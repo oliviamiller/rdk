@@ -405,7 +405,7 @@ func (m *EncodedMotor) rpmMonitorPass(pos, lastPos, now, lastTime int64, rpmDebu
 	// halve and quarter rpm values based on seconds remaining in move
 
 	desiredRPM := m.state.desiredRPM
-	timeLeftSeconds := 60.0 * rotationsLeft / desiredRPM
+	timeLeftSeconds := math.Abs(60.0 * rotationsLeft / desiredRPM)
 
 	desiredRPM = slowDownMath(timeLeftSeconds, desiredRPM, m.rampRate)
 
@@ -468,7 +468,7 @@ func (m *EncodedMotor) computeNewPowerPct(currentRPM, desiredRPM float64) float6
 		// to it, and we'll start moving soon.
 		return m.computeRamp(lastPowerPct, lastPowerPct*2)
 	}
-	dOverC := desiredRPM / currentRPM * float64(m.flip)
+	dOverC := desiredRPM / currentRPM
 	dOverC = math.Min(dOverC, 2)
 	dOverC = math.Max(dOverC, -2)
 
@@ -527,7 +527,6 @@ func (m *EncodedMotor) computeRamp(oldPower, newPower float64) float64 {
 // Both the RPM and the revolutions can be assigned negative values to move in a backwards direction.
 // Note: if both are negative the motor will spin in the forward direction.
 func (m *EncodedMotor) GoFor(ctx context.Context, rpm, revolutions float64, extra map[string]interface{}) error {
-	rpm *= float64(m.flip)
 
 	ctx, done := m.opMgr.New(ctx)
 	defer done()
@@ -546,6 +545,8 @@ func (m *EncodedMotor) GoFor(ctx context.Context, rpm, revolutions float64, extr
 func (m *EncodedMotor) goForInternal(ctx context.Context, rpm, revolutions float64) error {
 	m.RPMMonitorStart()
 
+	rpm *= float64(m.flip)
+
 	var d int64 = 1
 
 	// Backwards
@@ -558,10 +559,11 @@ func (m *EncodedMotor) goForInternal(ctx context.Context, rpm, revolutions float
 
 	switch speed := math.Abs(rpm); {
 	case speed < 0.1:
-		m.logger.Warnf("motor (%s) speed is nearly 0 rev_per_min", m.Name())
+		m.logger.Warn("motor speed is nearly 0 rev_per_min")
 		return motor.NewZeroRPMError()
-	case speed > m.cfg.MaxRPM-0.1:
-		m.logger.Warnf("motor (%s) speed is nearly the max rev_per_min (%f)", m.Name(), m.cfg.MaxRPM)
+	case m.cfg.MaxRPM > 0 && speed > m.cfg.MaxRPM-0.1:
+		m.logger.Warnf("motor speed is nearly the max rev_per_min (%f)", m.cfg.MaxRPM)
+	default:
 	}
 
 	m.stateMu.Lock()
@@ -586,7 +588,7 @@ func (m *EncodedMotor) goForInternal(ctx context.Context, rpm, revolutions float
 	if err != nil {
 		return err
 	}
-	m.state.setPoint = int64(pos) + d*numTicks*m.flip
+	m.state.setPoint = int64(pos) + d*numTicks
 
 	_, rpmDebug := getRPMSleepDebug()
 	if rpmDebug {
@@ -600,9 +602,8 @@ func (m *EncodedMotor) goForInternal(ctx context.Context, rpm, revolutions float
 	if err != nil {
 		return err
 	}
-	if !isOn {
-		// if we're off we start slow, otherwise we just set the desired rpm
-		err := m.setPower(ctx, float64(d)*0.03, true)
+	if !isOn { // if we're off we start slow, otherwise we just set the desired rpm
+		err := m.setPower(ctx, 0.03*float64(d)*float64(m.flip), true)
 		if err != nil {
 			return err
 		}
@@ -648,6 +649,8 @@ func (m *EncodedMotor) Close(ctx context.Context) error {
 // at a specific speed. Regardless of the directionality of the RPM this function will move the motor
 // towards the specified target.
 func (m *EncodedMotor) GoTo(ctx context.Context, rpm, targetPosition float64, extra map[string]interface{}) error {
+
+	rpm *= float64(m.flip)
 	curPos, err := m.Position(ctx, extra)
 	if err != nil {
 		return err
@@ -659,7 +662,7 @@ func (m *EncodedMotor) GoTo(ctx context.Context, rpm, targetPosition float64, ex
 		m.logger.Debug("GoTo distance nearly zero, not moving")
 		return nil
 	}
-	return m.GoFor(ctx, math.Abs(rpm), moveDistance, extra)
+	return m.GoFor(ctx, rpm, moveDistance, extra)
 }
 
 // GoTillStop moves until physically stopped (though with a ten second timeout) or stopFunc() returns true.
