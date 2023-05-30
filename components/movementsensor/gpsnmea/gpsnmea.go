@@ -3,6 +3,7 @@ package gpsnmea
 
 import (
 	"context"
+	"log"
 
 	"github.com/edaniels/golog"
 	"github.com/pkg/errors"
@@ -46,6 +47,7 @@ type I2CConfig struct {
 
 // Validate ensures all parts of the config are valid.
 func (cfg *Config) Validate(path string) ([]string, error) {
+	log.Println("validate gps nmea")
 	var deps []string
 	if cfg.Board == "" && cfg.ConnectionType == i2cStr {
 		return nil, utils.NewConfigValidationFieldRequiredError(path, "board")
@@ -63,6 +65,7 @@ func (cfg *Config) Validate(path string) ([]string, error) {
 		deps = append(deps, cfg.Board)
 		return deps, cfg.I2CConfig.ValidateI2C(path)
 	case serialStr:
+		log.Println("connection type serial")
 		return nil, cfg.SerialConfig.ValidateSerial(path)
 	default:
 		return nil, utils.NewConfigValidationFieldRequiredError(path, "connection_type")
@@ -100,6 +103,7 @@ type NmeaMovementSensor interface {
 }
 
 func init() {
+	log.Println("init")
 	resource.RegisterComponent(
 		movementsensor.API,
 		model,
@@ -121,6 +125,7 @@ func newNMEAGPS(
 	conf resource.Config,
 	logger golog.Logger,
 ) (movementsensor.MovementSensor, error) {
+	log.Println("new NMEA GPS")
 	newConf, err := resource.NativeConfig[*Config](conf)
 	if err != nil {
 		return nil, err

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 
 	"github.com/edaniels/golog"
@@ -65,6 +66,7 @@ func (cfg *StationConfig) Validate(path string) ([]string, error) {
 
 	switch cfg.CorrectionSource {
 	case ntripStr:
+		log.Println("rtk station correction source ntrip")
 		return nil, cfg.NtripConfig.ValidateNtrip(path)
 	case i2cStr:
 		if cfg.Board == "" {

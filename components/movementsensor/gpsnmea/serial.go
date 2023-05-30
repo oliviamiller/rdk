@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 
 	"github.com/adrianmo/go-nmea"
@@ -46,21 +47,26 @@ type SerialNMEAMovementSensor struct {
 
 // NewSerialGPSNMEA gps that communicates over serial.
 func NewSerialGPSNMEA(ctx context.Context, name resource.Name, conf *Config, logger golog.Logger) (NmeaMovementSensor, error) {
+	log.Println("new serial gps nmea")
 	serialPath := conf.SerialConfig.SerialPath
+	log.Println(serialPath)
 	if serialPath == "" {
 		return nil, fmt.Errorf("SerialNMEAMovementSensor expected non-empty string for %q", conf.SerialConfig.SerialPath)
 	}
 	correctionPath := conf.SerialConfig.SerialCorrectionPath
+	log.Println(correctionPath)
 	if correctionPath == "" {
 		correctionPath = serialPath
 		logger.Infof("SerialNMEAMovementSensor: correction_path using path: %s", correctionPath)
 	}
 	baudRate := conf.SerialConfig.SerialBaudRate
+	log.Println(baudRate)
 	if baudRate == 0 {
 		baudRate = 9600
 		logger.Info("SerialNMEAMovementSensor: serial_baud_rate using default 9600")
 	}
 	correctionBaudRate := conf.SerialConfig.SerialCorrectionBaudRate
+	log.Println(correctionBaudRate)
 	if correctionBaudRate == 0 {
 		correctionBaudRate = baudRate
 		logger.Infof("SerialNMEAMovementSensor: correction_baud using baud_rate: %d", baudRate)
@@ -101,12 +107,13 @@ func NewSerialGPSNMEA(ctx context.Context, name resource.Name, conf *Config, log
 	if err := g.Start(ctx); err != nil {
 		g.logger.Errorf("Did not create nmea gps with err %#v", err.Error())
 	}
-
+	log.Println("returning")
 	return g, err
 }
 
 // Start begins reading nmea messages from module and updates gps data.
 func (g *SerialNMEAMovementSensor) Start(ctx context.Context) error {
+	log.Println("START NMEA")
 	g.activeBackgroundWorkers.Add(1)
 	utils.PanicCapturingGo(func() {
 		defer g.activeBackgroundWorkers.Done()
@@ -119,15 +126,20 @@ func (g *SerialNMEAMovementSensor) Start(ctx context.Context) error {
 			}
 
 			if !g.disableNmea {
+				log.Println("NMEA enabled")
 				line, err := r.ReadString('\n')
+				log.Println("read string")
 				if err != nil {
+					log.Println("error")
 					g.logger.Errorf("can't read gps serial %s", err)
 					g.err.Set(err)
 					return
 				}
+				log.Println("here")
 				// Update our struct's gps data in-place
 				g.mu.Lock()
 				err = g.data.parseAndUpdate(line)
+				log.Println("did parse and update")
 				g.mu.Unlock()
 				if err != nil {
 					g.logger.Warnf("can't parse nmea sentence: %#v", err)
@@ -148,6 +160,8 @@ func (g *SerialNMEAMovementSensor) GetCorrectionInfo() (string, uint) {
 func (g *SerialNMEAMovementSensor) Position(ctx context.Context, extra map[string]interface{}) (*geo.Point, float64, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+	log.Println("in location")
+	log.Println(g.data)
 	if g.data.location == nil {
 		return geo.NewPoint(0, 0), 0, errNilLocation
 	}
