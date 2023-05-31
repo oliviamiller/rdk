@@ -1,25 +1,35 @@
 import vue from '@vitejs/plugin-vue';
+import reactivityTransform from '@vue-macros/reactivity-transform/dist/vite';
 import Hashes from 'jshashes';
 import { defineConfig } from 'vite';
+import path from 'node:path';
+import url from 'node:url';
 
 const MD5 = new Hashes.MD5();
 
+export const plugins = [
+  vue({
+    template: {
+      compilerOptions: {
+        // treat all tags with a dash as custom elements
+        isCustomElement: (tag) => tag.includes('-'),
+      },
+    },
+  }),
+  reactivityTransform(),
+];
+
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [
-    vue({
-      reactivityTransform: true,
-      template: {
-        compilerOptions: {
-          // treat all tags with a dash as custom elements
-          isCustomElement: (tag) => tag.includes('-'),
-        },
-      },
-    }),
-  ],
+  plugins,
   build: {
-    minify: 'terser',
     sourcemap: true,
+
+    /**
+     * This is currently set to infinity due to the lack of an asset pipeline
+     * when RC is embedded in app.viam.com.
+     */
+    assetsInlineLimit: Number.POSITIVE_INFINITY,
     rollupOptions: {
       input: {
         control: './src/main.ts',
@@ -53,5 +63,10 @@ export default defineConfig({
   },
   server: {
     port: 5174,
+  },
+  resolve: {
+    alias: {
+      '@': path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), './src'),
+    },
   },
 });
