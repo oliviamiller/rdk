@@ -1,18 +1,25 @@
-
 <script setup lang="ts">
 
-import { $ref, $computed } from 'vue/macros';
+import { $ref, $computed } from '@vue-macros/reactivity-transform/macros';
 import { grpc } from '@improbable-eng/grpc-web';
-import { toast } from '../lib/toast';
+import { toast } from '@/lib/toast';
 import { Struct } from 'google-protobuf/google/protobuf/struct_pb';
 import * as THREE from 'three';
-import { Client, commonApi, ResponseStream, robotApi, ServiceError, slamApi, motionApi } from '@viamrobotics/sdk';
-import { displayError, isServiceError } from '../lib/error';
-import { rcLogConditionally } from '../lib/log';
-import PCD from './pcd/pcd-view.vue';
-import { copyToClipboardWithToast } from '../lib/copy-to-clipboard';
-import Slam2dRender from './slam-2d-render.vue';
-import { filterResources } from '../lib/resource';
+import {
+  Client,
+  commonApi,
+  type ResponseStream,
+  robotApi,
+  type ServiceError,
+  slamApi,
+  motionApi,
+} from '@viamrobotics/sdk';
+import { displayError, isServiceError } from '@/lib/error';
+import { rcLogConditionally } from '@/lib/log';
+import PCD from '../pcd/pcd-view.vue';
+import { copyToClipboardWithToast } from '@/lib/copy-to-clipboard';
+import Slam2dRenderer from './2d-renderer.vue';
+import { filterResources } from '@/lib/resource';
 import { onMounted, onUnmounted } from 'vue';
 
 type MapAndPose = { map: Uint8Array, pose: commonApi.Pose}
@@ -22,8 +29,14 @@ const props = defineProps<{
   resources: commonApi.ResourceName.AsObject[]
   client: Client
   statusStream: ResponseStream<robotApi.StreamStatusResponse> | null
+  operations: {
+    op: robotApi.Operation.AsObject
+    elapsed: number
+  }[]
 }>();
+
 const refreshErrorMessage = 'Error refreshing map. The map shown may be stale.';
+const displayPose = $ref({ x: 0, y: 0, z: 0, ox: 0, oy: 0, oz: 0, th: 0 });
 let refreshErrorMessage2d = $ref<string | null>();
 let refreshErrorMessage3d = $ref<string | null>();
 let selected2dValue = $ref('manual');
@@ -38,15 +51,33 @@ let refresh2DCancelled = true;
 let refresh3DCancelled = true;
 let updatedDest = $ref(false);
 let destinationMarker = $ref(new THREE.Vector3());
-let moveClick = $computed(() => (
-  filterResources(props.resources, 'rdk', 'component', 'base') !== undefined) && updatedDest);
-const basePose = new commonApi.Pose();
+
 const motionServiceReq = new motionApi.MoveOnMapRequest();
 
 const loaded2d = $computed(() => (pointcloud !== undefined && pose !== undefined));
 
 let slam2dTimeoutId = -1;
 let slam3dTimeoutId = -1;
+
+const moveClicked = $computed(() => {
+  for (const element of props.operations) {
+    if (element.op.method.includes('MoveOnMap')) {
+      return true;
+    }
+  }
+  return false;
+});
+
+// get all resources which are bases
+const baseResources = $computed(() => filterResources(props.resources, 'rdk', 'component', 'base'));
+
+// allowMove is only true if we have a base, there exists a destination and there is no in-flight MoveOnMap req
+const allowMove = $computed(() => (
+  baseResources !== undefined &&
+  baseResources.length === 1 &&
+  updatedDest &&
+  !moveClicked
+));
 
 const concatArrayU8 = (arrays: Uint8Array[]) => {
   const totalLength = arrays.reduce((acc, value) => acc + value.length, 0);
@@ -132,7 +163,7 @@ const fetchFeatureFlags = (name: string): Promise<{[key: string]: boolean}> => {
          *  signifies that the feature flag is false
          */
         if (error) {
-          if (error.code === grpc.Code.Unimplemented) {
+          if (error.code === grpc.Code.Unimplemented || error.code === grpc.Code.Unknown) {
             resolve({});
             return;
           }
@@ -146,11 +177,12 @@ const fetchFeatureFlags = (name: string): Promise<{[key: string]: boolean}> => {
   });
 };
 
-const executeMoveOnMap = async () => {
-  moveClick = !moveClick;
+const deleteDestinationMarker = () => {
+  updatedDest = false;
+  destinationMarker = new THREE.Vector3();
+};
 
-  // get base resources
-  const baseResources = filterResources(props.resources, 'rdk', 'component', 'base');
+const moveOnMap = async () => {
 
   /*
    * set request name
@@ -198,15 +230,26 @@ const executeMoveOnMap = async () => {
     new grpc.Metadata(),
     (error: ServiceError | null, response: motionApi.MoveOnMapResponse | null) => {
       if (error) {
-        moveClick = !moveClick;
+        deleteDestinationMarker();
         toast.error(`Error moving: ${error}`);
         return;
       }
-      moveClick = !moveClick;
+      deleteDestinationMarker();
       toast.success(`MoveOnMap success: ${response!.getSuccess()}`);
     }
   );
 
+};
+
+const stopMoveOnMap = () => {
+  for (const element of props.operations) {
+    if (element.op.method.includes('MoveOnMap')) {
+      const req = new robotApi.CancelOperationRequest();
+      req.setId(element.op.id);
+      rcLogConditionally(req);
+      props.client.robotService.cancelOperation(req, new grpc.Metadata(), displayError);
+    }
+  }
 };
 
 const refresh2d = async (name: string) => {
@@ -232,14 +275,15 @@ const handleRefresh2dResponse = (response: MapAndPose): void => {
   pointcloud = response.map;
   pose = response.pose;
 
-  // we round to the tenths per figma design
-  basePose.setX(Number(pose!.getX()!.toFixed(1)!));
-  basePose.setY(Number(pose!.getY()!.toFixed(1)!));
-  basePose.setZ(Number(pose!.getZ()!.toFixed(1)!));
-  basePose.setOX(Number(pose!.getOX()!.toFixed(1)!));
-  basePose.setOY(Number(pose!.getOY()!.toFixed(1)!));
-  basePose.setOZ(Number(pose!.getOZ()!.toFixed(1)!));
-  basePose.setTheta(Number(pose!.getTheta()!.toFixed(1)!));
+  displayPose.x = Number(pose.getX().toFixed(1));
+  displayPose.y = Number(pose.getY().toFixed(1));
+  displayPose.z = Number(pose.getZ().toFixed(1));
+
+  displayPose.ox = Number(pose.getOX().toFixed(1));
+  displayPose.oy = Number(pose.getOY().toFixed(1));
+  displayPose.oz = Number(pose.getOZ().toFixed(1));
+  displayPose.th = Number(pose.getTheta().toFixed(1));
+
   pointCloudUpdateCount += 1;
 };
 
@@ -394,12 +438,7 @@ const handleUpdateDestY = (event: CustomEvent<{ value: string }>) => {
 };
 
 const baseCopyPosition = () => {
-  copyToClipboardWithToast(JSON.stringify(basePose.toObject()));
-};
-
-const executeDeleteDestinationMarker = () => {
-  updatedDest = false;
-  destinationMarker = new THREE.Vector3();
+  copyToClipboardWithToast(JSON.stringify(displayPose));
 };
 
 const toggleAxes = () => {
@@ -430,7 +469,15 @@ onUnmounted(() => {
       slot="title"
       crumbs="slam"
     />
-    <div class="border-medium flex flex-wrap gap-4 border border-t-0 sm:flex-nowrap">
+    <v-button
+      slot="header"
+      variant="danger"
+      icon="stop-circle"
+      :disabled="moveClicked ? 'false' : 'true'"
+      label="STOP"
+      @click="stopMoveOnMap()"
+    />
+    <div class="flex flex-wrap gap-4 border border-t-0 border-medium sm:flex-nowrap">
       <div class="flex min-w-fit flex-col gap-4 p-4">
         <div class="float-left pb-4">
           <div class="flex">
@@ -445,8 +492,8 @@ onUnmounted(() => {
                 <select
                   v-model="selected2dValue"
                   class="
-                      m-0 w-full appearance-none border border-solid border-black bg-white bg-clip-padding px-3 py-1.5
-                      text-xs font-normal text-gray-700 focus:outline-none
+                      m-0 w-full appearance-none border border-solid border-medium bg-white bg-clip-padding
+                      px-3 py-1.5 text-xs font-normal text-default focus:outline-none
                     "
                   aria-label="Default select example"
                   @change="selectSLAM2dRefreshFrequency()"
@@ -494,14 +541,14 @@ onUnmounted(() => {
               />
             </div>
           </div>
-          <hr class="border-medium my-4 border-t">
+          <hr class="my-4 border-t border-medium">
           <div class="flex flex-row">
             <p class="mb-1 pr-52 font-bold text-gray-800">
               Ending Position
             </p>
             <v-icon
               name="trash"
-              @click="executeDeleteDestinationMarker()"
+              @click="deleteDestinationMarker()"
             />
           </div>
           <div class="flex flex-row pb-2">
@@ -528,8 +575,8 @@ onUnmounted(() => {
             label="Move"
             variant="success"
             icon="play-circle-filled"
-            :disabled="moveClick ? 'false' : 'true'"
-            @click="executeMoveOnMap()"
+            :disabled="allowMove ? 'false' : 'true'"
+            @click="moveOnMap()"
           />
           <v-switch
             class="pt-2"
@@ -556,17 +603,17 @@ onUnmounted(() => {
                 <p class="items-end pr-2 text-xs text-gray-500">
                   x
                 </p>
-                <p>{{ basePose.getX() }}</p>
+                <p>{{ displayPose.x }}</p>
 
                 <p class="pl-9 pr-2 text-xs text-gray-500">
                   y
                 </p>
-                <p>{{ basePose.getY() }}</p>
+                <p>{{ displayPose.y }}</p>
 
                 <p class="pl-9 pr-2 text-xs text-gray-500">
                   z
                 </p>
-                <p>{{ basePose.getZ() }}</p>
+                <p>{{ displayPose.z }}</p>
               </div>
             </div>
             <div class="flex flex-col pl-10">
@@ -577,22 +624,22 @@ onUnmounted(() => {
                 <p class="pr-2 text-xs text-gray-500">
                   o<sub>x</sub>
                 </p>
-                <p>{{ basePose.getOX() }}</p>
+                <p>{{ displayPose.ox }}</p>
 
                 <p class="pl-9 pr-2 text-xs text-gray-500">
                   o<sub>y</sub>
                 </p>
-                <p>{{ basePose.getOY() }}</p>
+                <p>{{ displayPose.oy }}</p>
 
                 <p class="pl-9 pr-2 text-xs text-gray-500">
                   o<sub>z</sub>
                 </p>
-                <p>{{ basePose.getOZ() }}</p>
+                <p>{{ displayPose.oz }}</p>
 
                 <p class="pl-9 pr-2 text-xs text-gray-500">
                   &theta;
                 </p>
-                <p>{{ basePose.getTheta() }}</p>
+                <p>{{ displayPose.th }}</p>
               </div>
             </div>
             <div class="pl-4 pt-2">
@@ -602,7 +649,7 @@ onUnmounted(() => {
               />
             </div>
           </div>
-          <Slam2dRender
+          <Slam2dRenderer
             :point-cloud-update-count="pointCloudUpdateCount"
             :pointcloud="pointcloud"
             :pose="pose"
@@ -617,79 +664,73 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-    <div class="pt-4">
-      <div class="flex items-center gap-2">
-        <v-switch
-          :value="show3d ? 'on' : 'off'"
-          @input="toggle3dExpand()"
-        />
-        <span class="pr-2">View SLAM Map (3D)</span>
-      </div>
+    <div class="border border-medium border-t-transparent p-4 ">
+      <v-switch
+        label="View SLAM Map (3D)"
+        :value="show3d ? 'on' : 'off'"
+        @input="toggle3dExpand()"
+      />
       <div
         v-if="refreshErrorMessage3d && show3d"
         class="border-l-4 border-red-500 bg-gray-100 px-4 py-3"
       >
         {{ refreshErrorMessage3d }}
       </div>
-      <div class="float-right pb-4">
-        <div class="flex">
-          <div
-            v-if="show3d"
-            class="w-64"
-          >
-            <p class="font-label mb-1 text-gray-800">
-              Refresh frequency
-            </p>
-            <div class="relative">
-              <select
-                v-model="selected3dValue"
-                class="
-                      border-medium m-0 w-full appearance-none border border-solid bg-white
+      <div class="flex items-end gap-2">
+        <div
+          v-if="show3d"
+          class="w-56"
+        >
+          <p class="font-label mb-1 text-gray-800">
+            Refresh frequency
+          </p>
+          <div class="relative">
+            <select
+              v-model="selected3dValue"
+              class="
+                      m-0 w-full appearance-none border border-solid border-medium bg-white
                       bg-clip-padding px-3 py-1.5 text-xs font-normal text-gray-700 focus:outline-none"
-                aria-label="Default select example"
-                @change="selectSLAMPCDRefreshFrequency()"
+              aria-label="Default select example"
+              @change="selectSLAMPCDRefreshFrequency()"
+            >
+              <option value="manual">
+                Manual Refresh
+              </option>
+              <option value="30">
+                Every 30 seconds
+              </option>
+              <option value="10">
+                Every 10 seconds
+              </option>
+              <option value="5">
+                Every 5 seconds
+              </option>
+              <option value="1">
+                Every second
+              </option>
+            </select>
+            <div
+              class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2"
+            >
+              <svg
+                class="h-4 w-4 stroke-2 text-default"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-linejoin="round"
+                stroke-linecap="round"
+                fill="none"
               >
-                <option value="manual">
-                  Manual Refresh
-                </option>
-                <option value="30">
-                  Every 30 seconds
-                </option>
-                <option value="10">
-                  Every 10 seconds
-                </option>
-                <option value="5">
-                  Every 5 seconds
-                </option>
-                <option value="1">
-                  Every second
-                </option>
-              </select>
-              <div
-                class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2"
-              >
-                <svg
-                  class="h-4 w-4 stroke-2 text-gray-700"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-linejoin="round"
-                  stroke-linecap="round"
-                  fill="none"
-                >
-                  <path d="M18 16L12 22L6 16" />
-                </svg>
-              </div>
+                <path d="M18 16L12 22L6 16" />
+              </svg>
             </div>
           </div>
-          <div class="px-2 pt-7">
-            <v-button
-              v-if="show3d"
-              icon="refresh"
-              label="Refresh"
-              @click="refresh3dMap()"
-            />
-          </div>
         </div>
+        <v-button
+          v-if="show3d"
+          icon="refresh"
+          label="Refresh"
+          @click="refresh3dMap()"
+        />
       </div>
       <PCD
         v-if="show3d"
