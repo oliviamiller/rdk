@@ -71,9 +71,8 @@ type I2CConfig struct {
 
 // Validate ensures all parts of the config are valid.
 func (cfg *Config) Validate(path string) ([]string, error) {
+	log.Println("validating rtk")
 	var deps []string
-	log.Println("validating config...")
-	log.Println(cfg.CorrectionSource)
 	switch cfg.CorrectionSource {
 	case ntripStr:
 		return nil, cfg.NtripConfig.ValidateNtrip(path)
@@ -90,6 +89,20 @@ func (cfg *Config) Validate(path string) ([]string, error) {
 	default:
 		return nil, ErrRoverValidation
 	}
+}
+
+func (g *RTKMovementSensor) Reconfigure(ctx context.Context, deps resource.Dependencies, conf resource.Config) error {
+	log.Println("reconfiguring")
+	newConfig, err := resource.NativeConfig[*Config](conf)
+	if err != nil {
+		return err
+	}
+
+	if g.inputProtocol != newConfig.NtripInputProtocol {
+		g.inputProtocol = newConfig.NtripInputProtocol
+	}
+
+	return nil
 }
 
 // ValidateI2C ensures all parts of the config are valid.
@@ -114,15 +127,12 @@ func (cfg *SerialConfig) ValidateSerial(path string) error {
 
 // ValidateNtrip ensures all parts of the config are valid.
 func (cfg *NtripConfig) ValidateNtrip(path string) error {
-	log.Println("validiating ntrip")
-	log.Println(cfg)
 	if cfg.NtripAddr == "" {
 		return utils.NewConfigValidationFieldRequiredError(path, "ntrip_addr")
 	}
 	if cfg.NtripPath == "" {
 		return utils.NewConfigValidationFieldRequiredError(path, "ntrip_path")
 	}
-	log.Println("N trip validated")
 	return nil
 }
 
@@ -133,8 +143,16 @@ func init() {
 		movementsensor.API,
 		roverModel,
 		resource.Registration[movementsensor.MovementSensor, *Config]{
-			Constructor: newRTKMovementSensor,
-		})
+			Constructor: func(
+				ctx context.Context,
+				deps resource.Dependencies,
+				conf resource.Config,
+				logger golog.Logger,
+			) (movementsensor.MovementSensor, error) {
+				return newRTKMovementSensor(ctx, deps, conf, logger)
+			},
+		},
+	)
 }
 
 // A RTKMovementSensor is an NMEA MovementSensor model that can intake RTK correction data.
@@ -169,7 +187,6 @@ func newRTKMovementSensor(
 	conf resource.Config,
 	logger golog.Logger,
 ) (movementsensor.MovementSensor, error) {
-	log.Println("new ")
 	newConf, err := resource.NativeConfig[*Config](conf)
 	if err != nil {
 		return nil, err
@@ -186,7 +203,9 @@ func newRTKMovementSensor(
 
 	g.inputProtocol = newConf.NtripInputProtocol
 
-	log.Println("making new rtk sensor")
+	if err := g.Reconfigure(ctx, nil, conf); err != nil {
+		return nil, err
+	}
 
 	nmeaConf := &gpsnmea.Config{
 		ConnectionType: newConf.ConnectionType,
@@ -197,15 +216,12 @@ func newRTKMovementSensor(
 	// Init NMEAMovementSensor
 	switch g.inputProtocol {
 	case serialStr:
-		log.Println("input serial")
 		var err error
 		nmeaConf.SerialConfig = (*gpsnmea.SerialConfig)(newConf.SerialConfig)
-		log.Println(nmeaConf.SerialConfig)
 		g.nmeamovementsensor, err = gpsnmea.NewSerialGPSNMEA(ctx, conf.ResourceName(), nmeaConf, logger)
 		if err != nil {
 			return nil, err
 		}
-		log.Println("made new serial GPS NMEA")
 	case i2cStr:
 		var err error
 		nmeaConf.I2CConfig = (*gpsnmea.I2CConfig)(newConf.I2CConfig)
@@ -508,8 +524,6 @@ func (g *RTKMovementSensor) receiveAndWriteSerial() {
 		g.logger.Infof("caster %s seems to be down", g.ntripClient.URL)
 	}
 
-	log.Println("write path")
-	log.Println(g.writepath)
 	options := slib.OpenOptions{
 		PortName:        g.writepath,
 		BaudRate:        uint(g.wbaud),
@@ -555,10 +569,8 @@ func (g *RTKMovementSensor) receiveAndWriteSerial() {
 			return
 		default:
 		}
-		log.Println("getting the stream")
 		msg, err := scanner.NextMessage()
-		log.Println("message")
-		log.Println(msg)
+
 		if err != nil {
 			g.ntripMu.Lock()
 			g.ntripStatus = false

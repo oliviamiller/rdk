@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"context"
+	"log"
 	"os"
 	"time"
 
@@ -23,6 +24,7 @@ type Watcher interface {
 // NewWatcher returns an optimally selected Watcher based on the
 // given config.
 func NewWatcher(ctx context.Context, config *Config, logger golog.Logger) (Watcher, error) {
+	log.Println("calling ensure")
 	if err := config.Ensure(false, logger); err != nil {
 		return nil, err
 	}
@@ -47,6 +49,7 @@ const checkForNewCertInterval = time.Hour
 // newCloudWatcher returns a cloudWatcher that will periodically fetch
 // new configs from the cloud.
 func newCloudWatcher(ctx context.Context, config *Config, logger golog.Logger) *cloudWatcher {
+	log.Println("cloud watcher")
 	configCh := make(chan *Config)
 	watcherDoneCh := make(chan struct{})
 	cancelCtx, cancel := context.WithCancel(ctx)
@@ -65,6 +68,7 @@ func newCloudWatcher(ctx context.Context, config *Config, logger golog.Logger) *
 			if time.Now().After(nextCheckForNewCert) {
 				checkForNewCert = true
 			}
+			log.Println("cloud watcher read from cloud")
 			newConfig, err := readFromCloud(cancelCtx, config, prevCfg, false, checkForNewCert, logger)
 			if err != nil {
 				logger.Errorw("error reading cloud config", "error", err)
