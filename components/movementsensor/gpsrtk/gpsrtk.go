@@ -91,7 +91,7 @@ func (cfg *Config) Validate(path string) ([]string, error) {
 	}
 }
 
-func (g *RTKMovementSensor) Reconfigure(ctx context.Context, deps resource.Dependencies, conf resource.Config) error {
+/* func (g *RTKMovementSensor) Reconfigure(ctx context.Context, deps resource.Dependencies, conf resource.Config) error {
 	log.Println("reconfiguring")
 	newConfig, err := resource.NativeConfig[*Config](conf)
 	if err != nil {
@@ -103,7 +103,7 @@ func (g *RTKMovementSensor) Reconfigure(ctx context.Context, deps resource.Depen
 	}
 
 	return nil
-}
+} */
 
 // ValidateI2C ensures all parts of the config are valid.
 func (cfg *I2CConfig) ValidateI2C(path string) error {
@@ -158,7 +158,6 @@ func init() {
 // A RTKMovementSensor is an NMEA MovementSensor model that can intake RTK correction data.
 type RTKMovementSensor struct {
 	resource.Named
-	resource.AlwaysRebuild
 	logger     golog.Logger
 	cancelCtx  context.Context
 	cancelFunc func()
@@ -202,10 +201,6 @@ func newRTKMovementSensor(
 	}
 
 	g.inputProtocol = newConf.NtripInputProtocol
-
-	if err := g.Reconfigure(ctx, nil, conf); err != nil {
-		return nil, err
-	}
 
 	nmeaConf := &gpsnmea.Config{
 		ConnectionType: newConf.ConnectionType,
@@ -258,6 +253,10 @@ func newRTKMovementSensor(
 	if newConf.CorrectionSource == i2cStr {
 		// I2C address only, assumes address is correct since this was checked when gps was initialized
 		g.addr = byte(newConf.I2cAddr)
+	}
+
+	if err := g.Reconfigure(ctx, nil, conf); err != nil {
+		return nil, err
 	}
 
 	if err := g.start(); err != nil {
