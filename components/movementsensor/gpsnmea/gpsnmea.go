@@ -23,7 +23,6 @@ func connectionTypeError(connType, serialConn, i2cConn string) error {
 // Config is used for converting NMEA Movement Sensor attibutes.
 type Config struct {
 	ConnectionType string `json:"connection_type"`
-	Board          string `json:"board,omitempty"`
 	DisableNMEA    bool   `json:"disable_nmea,omitempty"`
 
 	*SerialConfig `json:"serial_attributes,omitempty"`
@@ -40,6 +39,7 @@ type SerialConfig struct {
 
 // I2CConfig is used for converting Serial NMEA MovementSensor config attributes.
 type I2CConfig struct {
+	Board       string `json:"board"`
 	I2CBus      string `json:"i2c_bus"`
 	I2cAddr     int    `json:"i2c_addr"`
 	I2CBaudRate int    `json:"i2c_baud_rate,omitempty"`
@@ -48,7 +48,6 @@ type I2CConfig struct {
 // Validate ensures all parts of the config are valid.
 func (cfg *Config) Validate(path string) ([]string, error) {
 	log.Println("validating nmea")
-	var deps []string
 	if cfg.Board == "" && cfg.ConnectionType == i2cStr {
 		return nil, utils.NewConfigValidationFieldRequiredError(path, "board")
 	}
@@ -56,14 +55,9 @@ func (cfg *Config) Validate(path string) ([]string, error) {
 	if cfg.ConnectionType == "" {
 		return nil, utils.NewConfigValidationFieldRequiredError(path, "connection_type")
 	}
-
 	switch cfg.ConnectionType {
 	case i2cStr:
-		if cfg.Board == "" {
-			return nil, utils.NewConfigValidationFieldRequiredError(path, "board")
-		}
-		deps = append(deps, cfg.Board)
-		return deps, cfg.I2CConfig.ValidateI2C(path)
+		return cfg.I2CConfig.ValidateI2C(path)
 	case serialStr:
 		return nil, cfg.SerialConfig.ValidateSerial(path)
 	default:
@@ -72,15 +66,19 @@ func (cfg *Config) Validate(path string) ([]string, error) {
 }
 
 // ValidateI2C ensures all parts of the config are valid.
-func (cfg *I2CConfig) ValidateI2C(path string) error {
+func (cfg *I2CConfig) ValidateI2C(path string) ([]string, error) {
+	var deps []string
+	if cfg.Board == "" {
+		return nil, utils.NewConfigValidationFieldRequiredError(path, "board")
+	}
 	if cfg.I2CBus == "" {
-		return utils.NewConfigValidationFieldRequiredError(path, "i2c_bus")
+		return nil, utils.NewConfigValidationFieldRequiredError(path, "i2c_bus")
 	}
 	if cfg.I2cAddr == 0 {
-		return utils.NewConfigValidationFieldRequiredError(path, "i2c_addr")
+		return nil, utils.NewConfigValidationFieldRequiredError(path, "i2c_addr")
 	}
-
-	return nil
+	deps = append(deps, cfg.Board)
+	return deps, nil
 }
 
 // ValidateSerial ensures all parts of the config are valid.

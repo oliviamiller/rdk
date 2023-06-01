@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"reflect"
 	"regexp"
@@ -79,7 +78,6 @@ type configData struct {
 
 // Ensure ensures all parts of the config are valid.
 func (c *Config) Ensure(fromCloud bool, logger golog.Logger) error {
-	log.Println("ensure")
 	if c.Cloud != nil {
 		if err := c.Cloud.Validate("cloud", fromCloud); err != nil {
 			return err
@@ -95,8 +93,6 @@ func (c *Config) Ensure(fromCloud bool, logger golog.Logger) error {
 	}
 
 	for idx := 0; idx < len(c.Modules); idx++ {
-		log.Println(c.Modules)
-		log.Println("validating module")
 		if err := c.Modules[idx].Validate(fmt.Sprintf("%s.%d", "modules", idx)); err != nil {
 			if c.DisablePartialStart {
 				return err
@@ -115,7 +111,6 @@ func (c *Config) Ensure(fromCloud bool, logger golog.Logger) error {
 	}
 
 	for idx := 0; idx < len(c.Components); idx++ {
-		log.Println("validating component")
 		dependsOn, err := c.Components[idx].Validate(fmt.Sprintf("%s.%d", "components", idx), resource.APITypeComponentName)
 		if err != nil {
 			fullErr := errors.Errorf("error validating component %s: %s", c.Components[idx].Name, err)

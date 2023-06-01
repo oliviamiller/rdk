@@ -3,7 +3,6 @@ package resource
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"reflect"
 	"strings"
 
@@ -272,7 +271,6 @@ func (conf *Config) validate(path, defaultAPIType string) ([]string, error) {
 		return nil, err
 	}
 	if conf.ConvertedAttributes != nil {
-		log.Println("validating converted atts")
 		validatedDeps, err := conf.ConvertedAttributes.Validate(path)
 		if err != nil {
 			return nil, err

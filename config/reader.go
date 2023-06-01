@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -181,7 +180,6 @@ func readFromCloud(
 		}
 		return nil, err
 	}
-	log.Println("reading from cloud.....")
 	// process the config
 	cfg, err := processConfigFromCloud(unprocessedConfig, logger)
 	if err != nil {
@@ -201,7 +199,6 @@ func readFromCloud(
 	tlsCertificate := cfg.Cloud.TLSCertificate
 	tlsPrivateKey := cfg.Cloud.TLSPrivateKey
 	if !cached {
-		log.Println("not cached")
 		// get cached certificate data
 		// read cached config from fs.
 		// process the config with fromReader() use processed config as cachedConfig to update the cert data.
@@ -290,7 +287,6 @@ func Read(
 	if err != nil {
 		return nil, err
 	}
-	log.Println("read function")
 	return FromReader(ctx, filePath, bytes.NewReader(buf), logger)
 }
 
@@ -328,7 +324,6 @@ func fromReader(
 	logger golog.Logger,
 	shouldReadFromCloud bool,
 ) (*Config, error) {
-	log.Println("from reader")
 	// First read and processes config from disk
 	unprocessedConfig := Config{
 		ConfigFilePath: originalPath,
@@ -343,7 +338,6 @@ func fromReader(
 	}
 
 	if shouldReadFromCloud && cfgFromDisk.Cloud != nil {
-		log.Println("should reader from cloud")
 		cfg, err := readFromCloud(ctx, cfgFromDisk, nil, true, true, logger)
 		return cfg, err
 	}
@@ -355,7 +349,6 @@ func fromReader(
 // and config validated with the assumption the config came from the cloud.
 // Returns an error if the unprocessedConfig is non-valid.
 func processConfigFromCloud(unprocessedConfig *Config, logger golog.Logger) (*Config, error) {
-	log.Println("process congit from cloud")
 	return processConfig(unprocessedConfig, true, logger)
 }
 
@@ -367,7 +360,6 @@ func processConfigLocalConfig(unprocessedConfig *Config, logger golog.Logger) (*
 }
 
 func processConfig(unprocessedConfig *Config, fromCloud bool, logger golog.Logger) (*Config, error) {
-	log.Println("calling ensure in process config")
 	if err := unprocessedConfig.Ensure(fromCloud, logger); err != nil {
 		return nil, err
 	}

@@ -3,7 +3,6 @@ package server
 
 import (
 	"context"
-	"log"
 	"net"
 	"os"
 	"path"
@@ -52,7 +51,6 @@ type robotServer struct {
 // RunServer is an entry point to starting the web server that can be called by main in a code
 // sample or otherwise be used to initialize the server.
 func RunServer(ctx context.Context, args []string, _ golog.Logger) (err error) {
-	log.Println("RUN SERVER")
 	var argsParsed Arguments
 	if err := utils.ParseFlags(args, &argsParsed); err != nil {
 		return err
@@ -157,7 +155,6 @@ func RunServer(ctx context.Context, args []string, _ golog.Logger) (err error) {
 // runServer is an entry point to starting the web server after the local config is read. Once the local config
 // is read the logger may be initialized to remote log. This ensure we capture errors starting up the server and report to the cloud.
 func (s *robotServer) runServer(ctx context.Context) error {
-	log.Println("run server")
 	initialReadCtx, cancel := context.WithTimeout(ctx, time.Second*5)
 	cfg, err := config.Read(initialReadCtx, s.args.ConfigFile, s.logger)
 	if err != nil {

@@ -70,8 +70,7 @@ func (cfg *StationConfig) Validate(path string) ([]string, error) {
 		if cfg.Board == "" {
 			return nil, utils.NewConfigValidationFieldRequiredError(path, "board")
 		}
-		deps = append(deps, cfg.Board)
-		return deps, cfg.I2CConfig.ValidateI2C(path)
+		return cfg.I2CConfig.ValidateI2C(path)
 	case serialStr:
 		if cfg.SerialConfig.SerialCorrectionPath == "" {
 			return nil, utils.NewConfigValidationFieldRequiredError(path, "serial_correction_path")

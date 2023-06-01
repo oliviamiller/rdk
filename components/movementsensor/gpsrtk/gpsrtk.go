@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"runtime"
+	"runtime/debug"
 	"sync"
 
 	"github.com/de-bkg/gognss/pkg/ntrip"
@@ -23,7 +25,7 @@ import (
 
 	"go.viam.com/rdk/components/board"
 	"go.viam.com/rdk/components/movementsensor"
-	gpsnmea "go.viam.com/rdk/components/movementsensor/gpsnmea"
+	"go.viam.com/rdk/components/movementsensor/gpsnmea"
 	"go.viam.com/rdk/resource"
 	"go.viam.com/rdk/spatialmath"
 )
@@ -34,7 +36,6 @@ var ErrRoverValidation = fmt.Errorf("only serial, I2C, and ntrip are supported c
 // Config is used for converting NMEA MovementSensor with RTK capabilities config attributes.
 type Config struct {
 	CorrectionSource string `json:"correction_source"`
-	Board            string `json:"board,omitempty"`
 	ConnectionType   string `json:"connection_type,omitempty"`
 
 	*SerialConfig `json:"serial_attributes,omitempty"`
@@ -64,6 +65,7 @@ type SerialConfig struct {
 
 // I2CConfig is used for converting attributes for a correction source.
 type I2CConfig struct {
+	Board       string `json:"board"`
 	I2CBus      string `json:"i2c_bus"`
 	I2cAddr     int    `json:"i2c_addr"`
 	I2CBaudRate int    `json:"i2c_baud_rate,omitempty"`
@@ -71,17 +73,13 @@ type I2CConfig struct {
 
 // Validate ensures all parts of the config are valid.
 func (cfg *Config) Validate(path string) ([]string, error) {
+	debug.PrintStack()
 	log.Println("validating rtk")
-	var deps []string
 	switch cfg.CorrectionSource {
 	case ntripStr:
 		return nil, cfg.NtripConfig.ValidateNtrip(path)
 	case i2cStr:
-		if cfg.Board == "" {
-			return nil, utils.NewConfigValidationFieldRequiredError(path, "board")
-		}
-		deps = append(deps, cfg.Board)
-		return deps, cfg.I2CConfig.ValidateI2C(path)
+		return cfg.I2CConfig.ValidateI2C(path)
 	case serialStr:
 		return nil, cfg.SerialConfig.ValidateSerial(path)
 	case "":
@@ -91,7 +89,7 @@ func (cfg *Config) Validate(path string) ([]string, error) {
 	}
 }
 
-/* func (g *RTKMovementSensor) Reconfigure(ctx context.Context, deps resource.Dependencies, conf resource.Config) error {
+func (g *RTKMovementSensor) Reconfigure(ctx context.Context, deps resource.Dependencies, conf resource.Config) error {
 	log.Println("reconfiguring")
 	newConfig, err := resource.NativeConfig[*Config](conf)
 	if err != nil {
@@ -102,19 +100,27 @@ func (cfg *Config) Validate(path string) ([]string, error) {
 		g.inputProtocol = newConfig.NtripInputProtocol
 	}
 
+	/* if g.correctionSource != newConfig.CorrectionSource {
+
+	} */
 	return nil
-} */
+}
 
 // ValidateI2C ensures all parts of the config are valid.
-func (cfg *I2CConfig) ValidateI2C(path string) error {
+func (cfg *I2CConfig) ValidateI2C(path string) ([]string, error) {
+	var deps []string
+	if cfg.Board == "" {
+		return nil, utils.NewConfigValidationFieldRequiredError(path, "board")
+	}
+	deps = append(deps, cfg.Board)
 	if cfg.I2CBus == "" {
-		return utils.NewConfigValidationFieldRequiredError(path, "i2c_bus")
+		return nil, utils.NewConfigValidationFieldRequiredError(path, "i2c_bus")
 	}
 	if cfg.I2cAddr == 0 {
-		return utils.NewConfigValidationFieldRequiredError(path, "i2c_addr")
+		return nil, utils.NewConfigValidationFieldRequiredError(path, "i2c_addr")
 	}
 
-	return nil
+	return deps, nil
 }
 
 // ValidateSerial ensures all parts of the config are valid.
@@ -139,20 +145,13 @@ func (cfg *NtripConfig) ValidateNtrip(path string) error {
 var roverModel = resource.DefaultModelFamily.WithModel("gps-rtk")
 
 func init() {
+	log.Println("init")
 	resource.RegisterComponent(
 		movementsensor.API,
 		roverModel,
 		resource.Registration[movementsensor.MovementSensor, *Config]{
-			Constructor: func(
-				ctx context.Context,
-				deps resource.Dependencies,
-				conf resource.Config,
-				logger golog.Logger,
-			) (movementsensor.MovementSensor, error) {
-				return newRTKMovementSensor(ctx, deps, conf, logger)
-			},
-		},
-	)
+			Constructor: newRTKMovementSensor,
+		})
 }
 
 // A RTKMovementSensor is an NMEA MovementSensor model that can intake RTK correction data.
@@ -186,6 +185,7 @@ func newRTKMovementSensor(
 	conf resource.Config,
 	logger golog.Logger,
 ) (movementsensor.MovementSensor, error) {
+	log.Println("new movement sensor")
 	newConf, err := resource.NativeConfig[*Config](conf)
 	if err != nil {
 		return nil, err
@@ -204,7 +204,6 @@ func newRTKMovementSensor(
 
 	nmeaConf := &gpsnmea.Config{
 		ConnectionType: newConf.ConnectionType,
-		Board:          newConf.Board,
 		DisableNMEA:    false,
 	}
 
@@ -255,13 +254,15 @@ func newRTKMovementSensor(
 		g.addr = byte(newConf.I2cAddr)
 	}
 
-	if err := g.Reconfigure(ctx, nil, conf); err != nil {
+	/*	if err := g.Reconfigure(ctx, deps, conf); err != nil {
 		return nil, err
-	}
+	} */
+	log.Println(runtime.ReadTrace())
 
-	if err := g.start(); err != nil {
+	/* if err := g.start(); err != nil {
 		return nil, err
-	}
+	} */
+	log.Println("after g start")
 	return g, g.err.Get()
 }
 
