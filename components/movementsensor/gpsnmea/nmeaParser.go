@@ -51,8 +51,6 @@ func (g *gpsData) parseAndUpdate(line string) error {
 	if gsv, ok := s.(nmea.GSV); ok {
 		// GSV provides the number of satellites in view
 		g.satsInView = int(gsv.NumberSVsInView)
-		//	log.Println("number of sats in view")
-		//log.Println(g.satsInView)
 	} else if rmc, ok := s.(nmea.RMC); ok {
 		// RMC provides validity, lon/lat, and ground speed.
 		if rmc.Validity == "A" {

@@ -12,7 +12,6 @@ import (
 	"io"
 	"log"
 	"runtime"
-	"runtime/debug"
 	"sync"
 
 	"github.com/de-bkg/gognss/pkg/ntrip"
@@ -73,7 +72,6 @@ type I2CConfig struct {
 
 // Validate ensures all parts of the config are valid.
 func (cfg *Config) Validate(path string) ([]string, error) {
-	debug.PrintStack()
 	log.Println("validating rtk")
 	switch cfg.CorrectionSource {
 	case ntripStr:
@@ -90,7 +88,6 @@ func (cfg *Config) Validate(path string) ([]string, error) {
 }
 
 func (g *RTKMovementSensor) Reconfigure(ctx context.Context, deps resource.Dependencies, conf resource.Config) error {
-	log.Println("reconfiguring")
 	newConfig, err := resource.NativeConfig[*Config](conf)
 	if err != nil {
 		return err
@@ -100,11 +97,11 @@ func (g *RTKMovementSensor) Reconfigure(ctx context.Context, deps resource.Depen
 		g.inputProtocol = newConfig.NtripInputProtocol
 	}
 
-	/* if g.correctionSource != newConfig.CorrectionSource {
+/*	if g.correctionSource != newConfig.CorrectionSource {
 
-	} */
+	}
 	return nil
-}
+} */
 
 // ValidateI2C ensures all parts of the config are valid.
 func (cfg *I2CConfig) ValidateI2C(path string) ([]string, error) {
@@ -127,6 +124,9 @@ func (cfg *I2CConfig) ValidateI2C(path string) ([]string, error) {
 func (cfg *SerialConfig) ValidateSerial(path string) error {
 	if cfg.SerialPath == "" {
 		return utils.NewConfigValidationFieldRequiredError(path, "serial_path")
+	}
+	if cfg.SerialBaudRate == 0 {
+		cfg.SerialBaudRate = 115200
 	}
 	return nil
 }
@@ -200,7 +200,11 @@ func newRTKMovementSensor(
 		err:        movementsensor.NewLastError(1, 1),
 	}
 
-	g.inputProtocol = newConf.NtripInputProtocol
+	if newConf.CorrectionSource == ntripStr {
+		g.inputProtocol = newConf.NtripInputProtocol
+	} else {
+		g.inputProtocol = newConf.CorrectionSource
+	}
 
 	nmeaConf := &gpsnmea.Config{
 		ConnectionType: newConf.ConnectionType,
@@ -208,7 +212,7 @@ func newRTKMovementSensor(
 	}
 
 	// Init NMEAMovementSensor
-	switch g.inputProtocol {
+	switch newConf.ConnectionType {
 	case serialStr:
 		var err error
 		nmeaConf.SerialConfig = (*gpsnmea.SerialConfig)(newConf.SerialConfig)
@@ -259,9 +263,9 @@ func newRTKMovementSensor(
 	} */
 	log.Println(runtime.ReadTrace())
 
-	/* if err := g.start(); err != nil {
+	if err := g.start(); err != nil {
 		return nil, err
-	} */
+	}
 	log.Println("after g start")
 	return g, g.err.Get()
 }
