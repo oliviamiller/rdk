@@ -5,6 +5,7 @@ package genericlinux
 
 import (
 	"context"
+	"log"
 	"sync"
 
 	"github.com/edaniels/golog"
@@ -93,6 +94,8 @@ func (h *I2cHandle) transactAtRegister(register byte, w, r []byte) error {
 	fullW := make([]byte, len(w)+1)
 	fullW[0] = register
 	copy(fullW[1:], w)
+	log.Println("FULL WRITE")
+	log.Println(fullW)
 	return h.device.Tx(fullW, r)
 }
 
