@@ -21,18 +21,18 @@ import (
 var model = resource.DefaultModelFamily.WithModel("ina226")
 
 const (
-	milliAmp                     = 1000 * 1000 // milliAmp = 1000 microAmpere * 1000 nanoAmpere
-	milliOhm                     = 1000 * 1000 // milliOhm = 1000 microOhm * 1000 nanoOhm
-	defaultI2Caddr               = 0x40
-	senseResistor        float64 = 100 * milliOhm                                                //.1 ohm
-	maxCurrent           float64 = 20000 * milliAmp                                              // 20 amp
-	calibratescale               = ((int64(1000*milliAmp) * int64(1000*milliOhm)) / 100000) << 9 // .00512 is internal fixed value in ina226
-	configRegister               = 0x00
-	shuntVoltageRegister         = 0x01
-	busVoltageRegister           = 0x02
-	powerRegister                = 0x03
-	currentRegister              = 0x04
-	calibrationRegister          = 0x05
+	milliAmp                   = 1000 * 1000 // milliAmp = 1000 microAmpere * 1000 nanoAmpere
+	milliOhm                   = 1000 * 1000 // milliOhm = 1000 microOhm * 1000 nanoOhm
+	defaultI2Caddr             = 0x40
+	senseResistor        int64 = 100 * milliOhm                                                //.1 ohm
+	maxCurrent           int64 = 20000 * milliAmp                                              // 20 amp
+	calibratescale             = ((int64(1000*milliAmp) * int64(1000*milliOhm)) / 100000) << 9 // .00512 is internal fixed value in ina226
+	configRegister             = 0x00
+	shuntVoltageRegister       = 0x01
+	busVoltageRegister         = 0x02
+	powerRegister              = 0x03
+	currentRegister            = 0x04
+	calibrationRegister        = 0x05
 )
 
 // Config is used for converting config attributes.
@@ -106,8 +106,8 @@ type ina226 struct {
 	logger     golog.Logger
 	addr       byte
 	bus        int
-	currentLSB float64
-	powerLSB   float64
+	currentLSB int64
+	powerLSB   int64
 	cal        uint16
 }
 
@@ -127,7 +127,7 @@ func (d *ina226) calibrate() error {
 	}
 
 	d.currentLSB = maxCurrent / (1 << 15)
-	d.powerLSB = 25 * d.currentLSB
+	d.powerLSB = (maxCurrent*25 + (1 << 14)) / (1 << 15)
 	// Calibration Register = 0.04096 / (current LSB * Shunt Resistance)
 	// Where lsb is in Amps and resistance is in ohms.
 	// Calibration register is 16 bits.
@@ -194,14 +194,17 @@ func (d *ina226) Readings(ctx context.Context, extra map[string]interface{}) (ma
 		return nil, err
 	}
 
-	pm.Current = float64(current) * d.currentLSB / 1000000000
+	log.Println(current)
+	log.Println(int64(current))
+
+	pm.Current = float64(int64(current)*d.currentLSB) / 1000000000
 
 	power, err := handle.ReadRegU16BE(powerRegister)
 	if err != nil {
 		return nil, err
 	}
 
-	pm.Power = float64((power)) * d.powerLSB / 1000000000
+	pm.Power = float64(int64((power))*d.powerLSB) / 1000000000
 
 	return map[string]interface{}{
 		"volts": pm.Voltage,
