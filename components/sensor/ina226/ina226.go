@@ -1,7 +1,6 @@
-// Package ina219 implements an ina219 voltage/current/power monitor sensor -
+// Package ina219 implements an ina226 voltage/current/power monitor sensor -
 // typically used for battery state monitoring.
-// Datasheet can be found at: https://www.ti.com/lit/ds/symlink/ina219.pdf
-// Example repo: https://github.com/periph/devices/blob/main/ina219/ina219.go
+// Datasheet can be found at: https://www.ti.com/lit/ds/symlink/ina226.pdf?ref_url=https%253A%252F%252Fwww.ti.com%252Fproduct%252FINA226&ts=1615260106728
 package ina226
 
 import (
@@ -120,14 +119,14 @@ type powerMonitor struct {
 
 func (d *ina226) calibrate() error {
 	if senseResistor <= 0 {
-		return fmt.Errorf("ina219 calibrate: senseResistor value invalid %f", senseResistor)
+		return fmt.Errorf("ina219 calibrate: senseResistor value invalid %d", senseResistor)
 	}
 	if maxCurrent <= 0 {
-		return fmt.Errorf("ina219 calibrate: maxCurrent value invalid %f", maxCurrent)
+		return fmt.Errorf("ina219 calibrate: maxCurrent value invalid %d", maxCurrent)
 	}
 
 	d.currentLSB = maxCurrent / (1 << 15)
-	d.powerLSB = (maxCurrent*25 + (1 << 14)) / (1 << 15)
+	d.powerLSB = 25 * d.currentLSB
 	// Calibration Register = 0.04096 / (current LSB * Shunt Resistance)
 	// Where lsb is in Amps and resistance is in ohms.
 	// Calibration register is 16 bits.
