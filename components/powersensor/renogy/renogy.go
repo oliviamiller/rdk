@@ -7,7 +7,6 @@ package renogy
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -160,8 +159,6 @@ func (r *Renogy) Current(ctx context.Context, extra map[string]interface{}) (flo
 func (r *Renogy) Power(ctx context.Context, extra map[string]interface{}) (float64, error) {
 	// reads the load wattage.
 	loadPower, err := r.readRegister(r.client, loadWattReg, 1)
-	fmt.Println(err)
-	fmt.Println(loadPower)
 	if err != nil {
 		return 0, err
 	}
@@ -233,7 +230,6 @@ func (r *Renogy) readRegister(client modbus.Client, register uint16, precision u
 	r.mu.Lock()
 	b, err := client.ReadHoldingRegisters(register, 1)
 	r.mu.Unlock()
-	fmt.Println(b)
 	if err != nil {
 		return 0, err
 	}
