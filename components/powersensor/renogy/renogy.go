@@ -7,6 +7,7 @@ package renogy
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -180,7 +181,7 @@ func (r *Renogy) Readings(ctx context.Context, extra map[string]interface{}) (ma
 	r.addReading(r.client, loadWattReg, 0, "LoadWatt")
 	r.addReading(r.client, battVoltReg, 1, "BattVolt")
 	r.addReading(r.client, battChargePctReg, 0, "BattChargePct")
-	r.addReading(r.client, maxSolarTodayWattReg, 1, "MaxSolarTodayWatt")
+	r.addReading(r.client, maxSolarTodayWattReg, 0, "MaxSolarTodayWatt")
 	r.addReading(r.client, minSolarTodayWattReg, 0, "MinSolarTodayWatt")
 	r.addReading(r.client, maxBattTodayVoltReg, 1, "MaxBattTodayVolt")
 	r.addReading(r.client, minBattTodayVoltReg, 1, "MinBattTodayVolt")
@@ -244,6 +245,7 @@ func (r *Renogy) readRegister(client modbus.Client, register uint16, precision u
 func float32FromBytes(bytes []byte, precision uint) float32 {
 	i := binary.BigEndian.Uint16(bytes)
 	ratio := math.Pow(10, float64(precision))
+	fmt.Println(float32(float64(i) / ratio))
 	return float32(float64(i) / ratio)
 }
 
