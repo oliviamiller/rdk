@@ -7,7 +7,6 @@ package renogy
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -180,8 +179,6 @@ func (r *Renogy) Power(ctx context.Context, extra map[string]interface{}) (float
 	client := modbus.NewClient(r.handler)
 
 	// reads the load wattage.
-	fmt.Println(r)
-	fmt.Println(r.handler)
 	loadPower, err := r.readRegister(client, loadWattReg, 1)
 	if err != nil {
 		return 0, err
@@ -250,11 +247,13 @@ func (r *Renogy) Readings(ctx context.Context, extra map[string]interface{}) (ma
 	}
 	readings["ControllerDegC"] = int32(ctlTemp)
 
-	err = r.handler.Close()
-	if err != nil {
-		return readings, err
+	if r.handler != nil {
+		err = r.handler.Close()
+		if err != nil {
+			return readings, err
+		}
+		r.handler = nil
 	}
-	r.handler = nil
 	return readings, nil
 }
 
@@ -291,12 +290,13 @@ func float32FromBytes(bytes []byte, precision uint) float32 {
 // Close closes the renogy modbus.
 func (r *Renogy) Close(ctx context.Context) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.handler != nil {
 		err := r.handler.Close()
 		if err != nil {
+			r.mu.Unlock()
 			return err
 		}
 	}
+	r.mu.Unlock()
 	return nil
 }
