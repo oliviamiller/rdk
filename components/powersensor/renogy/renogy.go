@@ -163,11 +163,6 @@ func (r *Renogy) Power(ctx context.Context, extra map[string]interface{}) (float
 		return 0, err
 	}
 
-	err = r.handler.Close()
-	if err != nil {
-		return 0, err
-	}
-	r.handler = nil
 	return float64(loadPower), err
 }
 
