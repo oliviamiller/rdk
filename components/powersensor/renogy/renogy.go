@@ -180,7 +180,7 @@ func (r *Renogy) Readings(ctx context.Context, extra map[string]interface{}) (ma
 	r.addReading(r.client, loadWattReg, 0, "LoadWatt")
 	r.addReading(r.client, battVoltReg, 1, "BattVolt")
 	r.addReading(r.client, battChargePctReg, 0, "BattChargePct")
-	r.addReading(r.client, maxSolarTodayWattReg, 0, "MaxSolarTodayWatt")
+	r.addReading(r.client, maxSolarTodayWattReg, 1, "MaxSolarTodayWatt")
 	r.addReading(r.client, minSolarTodayWattReg, 0, "MinSolarTodayWatt")
 	r.addReading(r.client, maxBattTodayVoltReg, 1, "MaxBattTodayVolt")
 	r.addReading(r.client, minBattTodayVoltReg, 1, "MinBattTodayVolt")
