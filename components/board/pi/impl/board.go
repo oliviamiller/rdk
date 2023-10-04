@@ -218,7 +218,7 @@ func (pi *piPigpio) reconfigureSpis(ctx context.Context, cfg *genericlinux.Confi
 func (pi *piPigpio) reconfigureAnalogs(ctx context.Context, cfg *genericlinux.Config) error {
 	// No need to reconfigure the old analog readers; just throw them out and make new ones.
 	pi.analogs = map[string]board.AnalogReader{}
-	for _, ac := range cfg.Analogs {
+	for _, ac := range cfg.AnalogReaders {
 		channel, err := strconv.Atoi(ac.Pin)
 		if err != nil {
 			return errors.Errorf("bad analog pin (%s)", ac.Pin)
@@ -230,7 +230,15 @@ func (pi *piPigpio) reconfigureAnalogs(ctx context.Context, cfg *genericlinux.Co
 		}
 
 		ar := &board.MCP3008AnalogReader{channel, bus, ac.ChipSelect}
-		pi.analogs[ac.Name] = board.SmoothAnalogReader(ar, ac, pi.logger)
+
+		// Convert to the common analog reader config for the analog smoother.
+		analogReaderCfg := board.AnalogReaderConfig{
+			Name:              ac.Name,
+			Pin:               ac.Pin,
+			AverageOverMillis: ac.AverageOverMillis,
+			SamplesPerSecond:  ac.SamplesPerSecond,
+		}
+		pi.analogs[ac.Name] = board.SmoothAnalogReader(ar, analogReaderCfg, pi.logger)
 	}
 	return nil
 }
