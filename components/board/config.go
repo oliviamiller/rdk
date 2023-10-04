@@ -35,7 +35,38 @@ func (config *I2CConfig) Validate(path string) error {
 	return nil
 }
 
+// AnalogReaderConfig describes the configuration of an analog reader on a board.
+type AnalogReaderConfig struct {
+	Name              string `json:"name"`
+	Pin               string `json:"pin"` // analog input pin name
+	AverageOverMillis int    `json:"average_over_ms,omitempty"`
+	SamplesPerSecond  int    `json:"samples_per_sec,omitempty"`
+}
+
+// Validate ensures all parts of the config are valid.
+func (config *AnalogReaderConfig) Validate(path string) error {
+	if config.Name == "" {
+		return utils.NewConfigValidationFieldRequiredError(path, "name")
+	}
+	return nil
+}
+
+// AnalogReaderConfig describes the configuration of an analog reader on a board.
+type AnalogWriterConfig struct {
+	Name string `json:"name"`
+	Pin  string `json:"pin"` // analog output pin name
+}
+
+// Validate ensures all parts of the config are valid.
+func (config *AnalogWriterConfig) Validate(path string) error {
+	if config.Name == "" {
+		return utils.NewConfigValidationFieldRequiredError(path, "name")
+	}
+	return nil
+}
+
 // AnalogConfig describes the configuration of an analog reader on a board.
+// TODO RSDK-5177 : move this config to generic linux and pi.
 type AnalogConfig struct {
 	Name              string `json:"name"`
 	Pin               string `json:"pin"`         // analog input pin on the ADC itself
