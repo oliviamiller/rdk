@@ -143,7 +143,7 @@ func (s *Sensor) Readings(ctx context.Context, extra map[string]interface{}) (ma
 		return nil, errors.Wrapf(err, "ultrasonic: cannot grab gpio %q", s.config.TriggerPin)
 	}
 
-	echoInterrupt.AddCallback(s.ticksChan)
+	echoInterrupt.AddCallback(ctx, s.ticksChan, nil)
 	defer echoInterrupt.RemoveCallback(s.ticksChan)
 
 	// we send a high and a low to the trigger pin 10 microseconds

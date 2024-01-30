@@ -376,9 +376,9 @@ func (s *DigitalInterruptWrapper) reset(conf board.DigitalInterruptConfig) error
 		}
 		s.conf = conf
 		s.di = di
-		for c := range s.callbacks {
-			s.di.AddCallback(c)
-		}
+		// for c := range s.callbacks {
+		// 	s.di.AddCallback(ctx,
+		// }
 		return nil
 	}
 	// reconf
@@ -409,11 +409,12 @@ func (s *DigitalInterruptWrapper) Tick(ctx context.Context, high bool, nanosecon
 
 // AddCallback adds a callback to be sent a low/high value to when a tick
 // happens.
-func (s *DigitalInterruptWrapper) AddCallback(c chan board.Tick) {
+func (s *DigitalInterruptWrapper) AddCallback(ctx context.Context, ch chan board.Tick, extra map[string]interface{}) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.callbacks[c] = struct{}{}
-	s.di.AddCallback(c)
+	s.callbacks[ch] = struct{}{}
+	s.di.AddCallback(ctx, ch, extra)
+	return nil
 }
 
 // RemoveCallback removes a listener for interrupts.

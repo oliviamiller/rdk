@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -38,7 +39,7 @@ type DigitalInterrupt interface {
 
 	// AddCallback adds a callback to be sent a low/high value to when a tick
 	// happens.
-	AddCallback(c chan Tick)
+	AddCallback(ctx context.Context, ch chan Tick, extra map[string]interface{}) error
 
 	// RemoveCallback removes a listener for interrupts
 	RemoveCallback(c chan Tick)
@@ -106,6 +107,7 @@ func (i *BasicDigitalInterrupt) Tick(ctx context.Context, high bool, nanoseconds
 		select {
 		case <-ctx.Done():
 			return errors.New("context cancelled")
+		//TODO: fix timestamps
 		case c <- Tick{High: high, TimestampNanosec: nanoseconds}:
 		}
 	}
@@ -113,10 +115,12 @@ func (i *BasicDigitalInterrupt) Tick(ctx context.Context, high bool, nanoseconds
 }
 
 // AddCallback adds a listener for interrupts.
-func (i *BasicDigitalInterrupt) AddCallback(c chan Tick) {
+func (i *BasicDigitalInterrupt) AddCallback(ctx context.Context, ch chan Tick, extra map[string]interface{}) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	i.callbacks = append(i.callbacks, c)
+	fmt.Println("HERE ADD CALLBACK DRIVER")
+	i.callbacks = append(i.callbacks, ch)
+	return nil
 }
 
 // RemoveCallback removes a listener for interrupts.

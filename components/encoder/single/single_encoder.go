@@ -182,7 +182,7 @@ func (e *Encoder) Reconfigure(
 // Start starts the Encoder background thread.
 func (e *Encoder) Start(ctx context.Context) {
 	encoderChannel := make(chan board.Tick)
-	e.I.AddCallback(encoderChannel)
+	e.I.AddCallback(ctx, encoderChannel, nil)
 	e.activeBackgroundWorkers.Add(1)
 	utils.ManagedGo(func() {
 		defer e.I.RemoveCallback(encoderChannel)

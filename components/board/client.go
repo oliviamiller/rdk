@@ -3,6 +3,7 @@ package board
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -10,9 +11,11 @@ import (
 	"github.com/pkg/errors"
 	commonpb "go.viam.com/api/common/v1"
 	pb "go.viam.com/api/component/board/v1"
+	"go.viam.com/utils"
 	"go.viam.com/utils/protoutils"
 	"go.viam.com/utils/rpc"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"go.viam.com/rdk/logging"
 	rprotoutils "go.viam.com/rdk/protoutils"
@@ -171,6 +174,7 @@ func (c *client) SetPowerMode(ctx context.Context, mode pb.PowerMode, duration *
 	}
 	_, err := c.client.SetPowerMode(ctx, &pb.SetPowerModeRequest{Name: c.info.name, PowerMode: mode, Duration: dur})
 	return err
+
 }
 
 func (c *client) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
@@ -223,6 +227,18 @@ type digitalInterruptClient struct {
 	*client
 	boardName            string
 	digitalInterruptName string
+
+	streamCancel  context.CancelFunc
+	streamRunning bool
+	streamReady   bool
+	streamMu      sync.Mutex
+	mu            sync.RWMutex
+
+	closeContext            context.Context
+	activeBackgroundWorkers sync.WaitGroup
+	cancelBackgroundWorkers context.CancelFunc
+	callbacks               map[string]chan Tick
+	extra                   *structpb.Struct
 }
 
 func (dic *digitalInterruptClient) Value(ctx context.Context, extra map[string]interface{}) (int64, error) {
@@ -242,15 +258,147 @@ func (dic *digitalInterruptClient) Value(ctx context.Context, extra map[string]i
 }
 
 func (dic *digitalInterruptClient) Tick(ctx context.Context, high bool, nanoseconds uint64) error {
-	panic(errUnimplemented)
+	tick := Tick{High: high, TimestampNanosec: nanoseconds}
+	dic.callbacks[dic.digitalInterruptName] <- tick
+	return nil
 }
 
-func (dic *digitalInterruptClient) AddCallback(c chan Tick) {
-	panic(errUnimplemented)
+func (dic *digitalInterruptClient) AddCallback(ctx context.Context, ch chan Tick, extra map[string]interface{}) error {
+	fmt.Println("Digital interrupt client add a callback")
+	dic.mu.Lock()
+	if dic.callbacks == nil {
+		dic.callbacks = make(map[string]chan Tick)
+	}
+
+	dic.callbacks[dic.digitalInterruptName] = ch
+	dic.mu.Unlock()
+
+	// We want only one ticks stream per board
+	dic.streamMu.Lock()
+	defer dic.streamMu.Unlock()
+	ext, err := protoutils.StructToStructPb(extra)
+	if err != nil {
+		return err
+	}
+	dic.extra = ext
+
+	// Start the stream
+	dic.streamRunning = true
+	dic.activeBackgroundWorkers.Add(1)
+	_, cancel := context.WithCancel(ctx)
+	dic.cancelBackgroundWorkers = cancel
+
+	// Create a background go routine that connects to the server's stream
+	utils.PanicCapturingGo(func() {
+		defer dic.activeBackgroundWorkers.Done()
+		dic.connectTickStream(context.Background())
+	})
+	dic.mu.RLock()
+	ready := dic.streamReady
+	dic.mu.RUnlock()
+
+	// wait until the stream is ready to return
+	for !ready {
+		fmt.Println("here - stream not ready yet")
+		dic.mu.RLock()
+		ready = dic.streamReady
+		dic.mu.RUnlock()
+		// wait for 50 ms before checking again
+		if !utils.SelectContextOrWait(ctx, 50*time.Millisecond) {
+			fmt.Println("context here")
+			return ctx.Err()
+		}
+	}
+	fmt.Println("returning nil - stream ready")
+	time.Sleep(10 * time.Second)
+	return nil
+}
+
+func (c *digitalInterruptClient) connectTickStream(ctx context.Context) {
+	for {
+		fmt.Println("connecting to the tick stream....")
+		c.mu.Lock()
+		c.streamReady = false
+		c.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			fmt.Println("context is done in connect stream")
+			return
+		default:
+		}
+
+		// TODO: add multiple dis in request
+		req := &pb.StreamTicksRequest{
+			Name:       c.info.name,
+			Interrupts: []string{c.digitalInterruptName},
+		}
+
+		ctx, cancel := context.WithCancel(ctx)
+		c.streamCancel = cancel
+
+		// call the server to start streaming ticks
+		stream, err := c.client.client.StreamTicks(ctx, req)
+		if err != nil {
+			fmt.Println("error while calling stream ticks from client")
+			c.logger.CError(ctx, err)
+			if utils.SelectContextOrWait(ctx, 3*time.Second) {
+				continue
+			} else {
+				fmt.Println("waited...returning")
+				return
+			}
+		}
+
+		// repeatly recieve from the stream
+		for {
+			select {
+			case <-ctx.Done():
+				fmt.Println("ending.....context done in connectStream")
+				return
+			default:
+			}
+
+			c.mu.Lock()
+			c.streamReady = true
+			c.mu.Unlock()
+			streamResp, err := stream.Recv()
+			if err != nil && streamResp == nil {
+				fmt.Println("stream resp is nil and error")
+				fmt.Println(err)
+				break
+			}
+			if err != nil {
+				fmt.Println("err not nil and resp not nil")
+				c.logger.CError(ctx, err)
+			} else {
+				// If there is a response with a tick, send it to the callback channel.
+				c.execCallback(ctx, streamResp)
+			}
+		}
+	}
+}
+
+func (dic *digitalInterruptClient) execCallback(ctx context.Context, resp *pb.StreamTicksResponse) {
+	// Convert proto tick to Go struct tick and send to the callback channel for that digital interrupt.
+	tick := Tick{
+		High:             resp.Tick.High,
+		TimestampNanosec: uint64(resp.Tick.Time.Nanos),
+	}
+	dic.callbacks[resp.Name] <- tick
 }
 
 func (dic *digitalInterruptClient) RemoveCallback(c chan Tick) {
 	panic(errUnimplemented)
+}
+
+// Close cleanly closes the underlying connections.
+func (dic *digitalInterruptClient) Close(ctx context.Context) error {
+	if dic.cancelBackgroundWorkers != nil {
+		dic.cancelBackgroundWorkers()
+		dic.cancelBackgroundWorkers = nil
+	}
+	dic.activeBackgroundWorkers.Wait()
+	return nil
 }
 
 // gpioPinClient satisfies a gRPC based board.GPIOPin. Refer to the interface

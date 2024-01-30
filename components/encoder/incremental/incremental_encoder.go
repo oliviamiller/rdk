@@ -211,8 +211,8 @@ func (e *Encoder) Start(ctx context.Context) {
 	chanA := make(chan board.Tick)
 	chanB := make(chan board.Tick)
 
-	e.A.AddCallback(chanA)
-	e.B.AddCallback(chanB)
+	e.A.AddCallback(ctx, chanA, nil)
+	e.B.AddCallback(ctx, chanB, nil)
 
 	aLevel, err := e.A.Value(ctx, nil)
 	if err != nil {

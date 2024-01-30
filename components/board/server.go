@@ -3,10 +3,12 @@ package board
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pkg/errors"
 	commonpb "go.viam.com/api/common/v1"
 	pb "go.viam.com/api/component/board/v1"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"go.viam.com/rdk/protoutils"
 	"go.viam.com/rdk/resource"
@@ -205,6 +207,45 @@ func (s *serviceServer) GetDigitalInterruptValue(
 		return nil, err
 	}
 	return &pb.GetDigitalInterruptValueResponse{Value: val}, nil
+}
+
+func (s *serviceServer) StreamTicks(
+	req *pb.StreamTicksRequest,
+	server pb.BoardService_StreamTicksServer,
+) error {
+	fmt.Println("SERVER STREAM TICKS")
+	b, err := s.coll.Resource(req.Name)
+	if err != nil {
+		return err
+	}
+
+	ticksChan := make(chan Tick, 1024)
+	digitalInterruptNames := req.Interrupts
+
+	for _, name := range digitalInterruptNames {
+		interrupt, ok := b.DigitalInterruptByName(name)
+		if !ok {
+			return errors.Errorf("unknown digital interrupt: %s", name)
+		}
+		interrupt.AddCallback(context.Background(), ticksChan, nil)
+	}
+
+	for {
+		fmt.Println("here in server streaming")
+		select {
+		case <-server.Context().Done():
+			fmt.Println("server context done")
+			return server.Context().Err()
+		case msg := <-ticksChan:
+			fmt.Println("recieved a tick in the tick channel, sending!!!!")
+			fmt.Println(msg)
+			// TODO: fix name stuff
+			err := server.Send(&pb.StreamTicksResponse{Name: digitalInterruptNames[0], Tick: &pb.Tick{High: msg.High, Time: &timestamppb.Timestamp{Nanos: int32(msg.TimestampNanosec)}}})
+			if err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // DoCommand receives arbitrary commands.
