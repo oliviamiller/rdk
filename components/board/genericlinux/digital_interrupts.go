@@ -6,7 +6,10 @@ package genericlinux
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/mkch/gpio"
 	"github.com/pkg/errors"
@@ -23,6 +26,7 @@ type digitalInterrupt struct {
 	cancelCtx    context.Context
 	cancelFunc   func()
 	config       *board.DigitalInterruptConfig
+	f            *os.File
 }
 
 func (b *Board) createDigitalInterrupt(
@@ -73,18 +77,23 @@ func (b *Board) createDigitalInterrupt(
 		cancelFunc:   cancelFunc,
 		config:       &config,
 	}
+
+	result.f, _ = os.Create("/tmp/linuxbuiltin.txt")
 	result.startMonitor()
 	return &result, nil
 }
 
 func (di *digitalInterrupt) startMonitor() {
 	di.boardWorkers.Add(1)
+
 	utils.ManagedGo(func() {
 		for {
 			select {
 			case <-di.cancelCtx.Done():
 				return
 			case event := <-di.line.Events():
+				line := fmt.Sprintf("%s : %d %d\n", di.config.Name, event.Time.UnixNano(), time.Now().UnixNano())
+				di.f.WriteString(line)
 				utils.UncheckedError(di.interrupt.Tick(
 					di.cancelCtx, event.RisingEdge, uint64(event.Time.UnixNano())))
 			}

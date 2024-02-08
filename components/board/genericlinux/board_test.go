@@ -142,4 +142,6 @@ func TestNewBoard(t *testing.T) {
 	gn2, err := b.GPIOPinByName("2")
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, gn2, test.ShouldNotBeNil)
+
+	b.close()
 }

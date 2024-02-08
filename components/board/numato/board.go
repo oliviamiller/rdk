@@ -229,6 +229,16 @@ func (b *numatoBoard) readThread() {
 	}
 }
 
+// AddCallback adds a callback to be sent a low/high value to when a tick
+// happens.
+func (b *numatoBoard) StartTickStream(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
+	return nil
+}
+
+func (b *numatoBoard) RemoveTickStream() error {
+	return nil
+}
+
 // AnalogReaderByName returns an analog reader by name.
 func (b *numatoBoard) AnalogReaderByName(name string) (board.AnalogReader, bool) {
 	ar, ok := b.analogs[name]

@@ -226,6 +226,16 @@ func (b *Board) WriteAnalog(ctx context.Context, pin string, value int32, extra 
 	return nil
 }
 
+// AddCallback adds a callback to be sent a low/high value to when a tick
+// happens.
+func (b *Board) StartTickStream(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
+	return nil
+}
+
+func (b *Board) RemoveTickStream() error {
+	return nil
+}
+
 // Close attempts to cleanly close each part of the board.
 func (b *Board) Close(ctx context.Context) error {
 	b.mu.Lock()
@@ -377,7 +387,7 @@ func (s *DigitalInterruptWrapper) reset(conf board.DigitalInterruptConfig) error
 		s.conf = conf
 		s.di = di
 		// for c := range s.callbacks {
-		// 	s.di.AddCallback(ctx,
+		// 	s.di.AddCallback(ctx, ch, nil)
 		// }
 		return nil
 	}

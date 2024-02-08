@@ -3,9 +3,12 @@ package incremental
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.viam.com/utils"
@@ -51,6 +54,7 @@ type Encoder struct {
 	cancelFunc              func()
 	activeBackgroundWorkers sync.WaitGroup
 	positionType            encoder.PositionType
+	f                       *os.File
 }
 
 // Pins describes the configuration of Pins for a quadrature encoder.
@@ -157,6 +161,7 @@ func (e *Encoder) Reconfigure(
 	e.mu.Lock()
 	e.A = encA
 	e.B = encB
+	e.f, _ = os.Create("/tmp/encoderbuilt.txt")
 	e.boardName = newConf.BoardName
 	e.encAName = newConf.Pins.A
 	e.encBName = newConf.Pins.B
@@ -247,11 +252,15 @@ func (e *Encoder) Start(ctx context.Context) {
 			case <-e.cancelCtx.Done():
 				return
 			case tick = <-chanA:
+				line := fmt.Sprintf("%d:%d\n", tick.TimestampNanosec, time.Now().UnixNano())
+				e.f.WriteString(line)
 				aLevel = 0
 				if tick.High {
 					aLevel = 1
 				}
 			case tick = <-chanB:
+				// line := fmt.Sprintf("%d %d\n", tick.TimestampNanosec, time.Now().UnixNano())
+				// e.f.WriteString(line)
 				bLevel = 0
 				if tick.High {
 					bLevel = 1
