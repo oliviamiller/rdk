@@ -3,6 +3,7 @@ package board
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pkg/errors"
 	commonpb "go.viam.com/api/common/v1"
@@ -216,14 +217,13 @@ func (s *serviceServer) StreamTicks(
 		return err
 	}
 
+	fmt.Println("in server stream ticks")
+
 	ticksChan := make(chan Tick, 1024)
 
-	for _, name := range req.Interrupts {
-		interrupt, ok := b.DigitalInterruptByName(name)
-		if !ok {
-			return errors.Errorf("unknown digital interrupt: %s", name)
-		}
-		interrupt.AddCallback(context.Background(), ticksChan, nil)
+	err = b.StreamTicks(server.Context(), req.Interrupts, ticksChan, nil)
+	if err != nil {
+		return err
 	}
 	for {
 		select {

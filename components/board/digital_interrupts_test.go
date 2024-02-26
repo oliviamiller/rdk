@@ -49,7 +49,7 @@ func TestBasicDigitalInterrupt1(t *testing.T) {
 	test.That(t, v.High, test.ShouldBeTrue)
 	test.That(t, v.TimestampNanosec, test.ShouldEqual, timeNanoSec)
 
-	i.RemoveCallback(c)
+	// i.RemoveCallback(c)
 
 	c = make(chan Tick, 2)
 	// i.AddCallback(c)
@@ -109,8 +109,8 @@ func TestRemoveCallbackDigitalInterrupt(t *testing.T) {
 	// i.AddCallback(c2)
 	test.That(t, ret, test.ShouldBeTrue)
 
-	i.RemoveCallback(c1)
-	i.RemoveCallback(c1)
+	// i.RemoveCallback(c1)
+	// i.RemoveCallback(c1)
 
 	ret2 := false
 	result := make(chan bool, 1)

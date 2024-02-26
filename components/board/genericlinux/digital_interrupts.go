@@ -6,10 +6,8 @@ package genericlinux
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/mkch/gpio"
 	"github.com/pkg/errors"
@@ -27,6 +25,8 @@ type digitalInterrupt struct {
 	cancelFunc   func()
 	config       *board.DigitalInterruptConfig
 	f            *os.File
+	callbacks    []chan board.Tick
+	mu           *sync.Mutex
 }
 
 func (b *Board) createDigitalInterrupt(
@@ -92,13 +92,20 @@ func (di *digitalInterrupt) startMonitor() {
 			case <-di.cancelCtx.Done():
 				return
 			case event := <-di.line.Events():
-				line := fmt.Sprintf("%s : %d %d\n", di.config.Name, event.Time.UnixNano(), time.Now().UnixNano())
-				di.f.WriteString(line)
+				// line := fmt.Sprintf("%s : %d %d\n", di.config.Name, event.Time.UnixNano(), time.Now().UnixNano())
+				// di.f.WriteString(line)
 				utils.UncheckedError(di.interrupt.Tick(
 					di.cancelCtx, event.RisingEdge, uint64(event.Time.UnixNano())))
 			}
 		}
 	}, di.boardWorkers.Done)
+}
+
+func (di *digitalInterrupt) AddCallback(ctx context.Context, ch chan board.Tick, extra map[string]interface{}) error {
+	di.mu.Lock()
+	defer di.mu.Unlock()
+	di.callbacks = append(di.callbacks, ch)
+	return nil
 }
 
 func (di *digitalInterrupt) Close() error {

@@ -64,6 +64,7 @@ type Encoder struct {
 	m         DirectionAware
 	boardName string
 	diPinName string
+	board     board.Board
 
 	positionType encoder.PositionType
 	logger       logging.Logger
@@ -152,6 +153,7 @@ func (e *Encoder) Reconfigure(
 	if err != nil {
 		return err
 	}
+	e.board = board
 
 	di, ok := board.DigitalInterruptByName(newConf.Pins.I)
 	if !ok {
@@ -182,10 +184,11 @@ func (e *Encoder) Reconfigure(
 // Start starts the Encoder background thread.
 func (e *Encoder) Start(ctx context.Context) {
 	encoderChannel := make(chan board.Tick)
-	e.I.AddCallback(ctx, encoderChannel, nil)
+	// e.I.AddCallback(ctx, encoderChannel, nil)
+	e.board.StreamTicks(context.Background(), []string{e.diPinName}, encoderChannel, nil)
 	e.activeBackgroundWorkers.Add(1)
 	utils.ManagedGo(func() {
-		defer e.I.RemoveCallback(encoderChannel)
+		// defer e.I.RemoveCallback(encoderChannel)
 		for {
 			select {
 			case <-e.cancelCtx.Done():

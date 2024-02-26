@@ -212,8 +212,8 @@ func (pca *PCA9685) frequency(ctx context.Context) (float64, error) {
 	return float64(pca.referenceClockSpeed) / 4096.0 / float64(prescale), nil
 }
 
-func (pca *PCA9685) StartTickStream(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
-	return nil
+func (pca *PCA9685) StreamTicks(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
+	return grpc.UnimplementedError
 }
 
 func (pca *PCA9685) RemoveTickStream() error {

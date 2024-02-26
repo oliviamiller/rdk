@@ -494,7 +494,14 @@ func (b *Board) WriteAnalog(ctx context.Context, pin string, value int32, extra 
 
 // AddCallback adds a callback to be sent a low/high value to when a tick
 // happens.
-func (b *Board) StartTickStream(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
+func (b *Board) StreamTicks(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
+	for _, name := range interrupts {
+		interrupt, ok := b.DigitalInterruptByName(name)
+		if !ok {
+			return errors.Errorf("unknown digital interrupt: %s", name)
+		}
+		interrupt.AddCallback(context.Background(), ch, nil)
+	}
 	return nil
 }
 

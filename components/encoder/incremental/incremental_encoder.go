@@ -8,7 +8,6 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/pkg/errors"
 	"go.viam.com/utils"
@@ -106,7 +105,6 @@ func NewIncrementalEncoder(
 		pRaw:         0,
 		pState:       0,
 	}
-
 	if err := e.Reconfigure(ctx, deps, conf); err != nil {
 		return nil, err
 	}
@@ -232,8 +230,6 @@ func (e *Encoder) Start(ctx context.Context) {
 	e.activeBackgroundWorkers.Add(1)
 
 	utils.ManagedGo(func() {
-		defer e.A.RemoveCallback(chanA)
-		defer e.B.RemoveCallback(chanB)
 		for {
 			// This looks redundant with the other select statement below, but it's not: if we're
 			// supposed to return, we need to do that even if chanA and chanB are full of data, and
@@ -252,15 +248,13 @@ func (e *Encoder) Start(ctx context.Context) {
 			case <-e.cancelCtx.Done():
 				return
 			case tick = <-chanA:
-				line := fmt.Sprintf("%d:%d\n", tick.TimestampNanosec, time.Now().UnixNano())
-				e.f.WriteString(line)
+				fmt.Println("CHAN A tick")
 				aLevel = 0
 				if tick.High {
 					aLevel = 1
 				}
 			case tick = <-chanB:
-				// line := fmt.Sprintf("%d %d\n", tick.TimestampNanosec, time.Now().UnixNano())
-				// e.f.WriteString(line)
+				fmt.Println("CHAN B tick")
 				bLevel = 0
 				if tick.High {
 					bLevel = 1
@@ -331,7 +325,7 @@ func (e *Encoder) RawPosition() int64 {
 
 // Close shuts down the Encoder.
 func (e *Encoder) Close(ctx context.Context) error {
-	e.logger.Info("closing encoder")
+	e.logger.Info("CLOSING ENCODER")
 	e.cancelFunc()
 	e.logger.Info("cancelled context")
 	e.activeBackgroundWorkers.Wait()

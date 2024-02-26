@@ -228,8 +228,8 @@ func (b *Board) WriteAnalog(ctx context.Context, pin string, value int32, extra 
 
 // AddCallback adds a callback to be sent a low/high value to when a tick
 // happens.
-func (b *Board) StartTickStream(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
-	return nil
+func (b *Board) StreamTicks(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
+	return grpc.UnimplementedError
 }
 
 func (b *Board) RemoveTickStream() error {
@@ -427,13 +427,13 @@ func (s *DigitalInterruptWrapper) AddCallback(ctx context.Context, ch chan board
 	return nil
 }
 
-// RemoveCallback removes a listener for interrupts.
-func (s *DigitalInterruptWrapper) RemoveCallback(c chan board.Tick) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.callbacks, c)
-	s.di.RemoveCallback(c)
-}
+// // RemoveCallback removes a listener for interrupts.
+// func (s *DigitalInterruptWrapper) RemoveCallback(c chan board.Tick) {
+// 	s.mu.Lock()
+// 	defer s.mu.Unlock()
+// 	delete(s.callbacks, c)
+// 	s.di.RemoveCallback(c)
+// }
 
 // Close does nothing.
 func (s *DigitalInterruptWrapper) Close(ctx context.Context) error {

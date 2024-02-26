@@ -202,11 +202,14 @@ func (pi *piPigpio) Reconfigure(
 	return nil
 }
 
-func (pi *piPigpio) StartTickStream(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
-	return nil
-}
-
-func (pi *piPigpio) RemoveTickStream() error {
+func (pi *piPigpio) StreamTicks(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
+	for _, name := range interrupts {
+		interrupt, ok := pi.DigitalInterruptByName(name)
+		if !ok {
+			return errors.Errorf("unknown digital interrupt: %s", name)
+		}
+		interrupt.AddCallback(context.Background(), ch, nil)
+	}
 	return nil
 }
 

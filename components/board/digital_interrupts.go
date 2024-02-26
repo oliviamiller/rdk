@@ -42,9 +42,6 @@ type DigitalInterrupt interface {
 	// happens.
 	AddCallback(ctx context.Context, ch chan Tick, extra map[string]interface{}) error
 
-	// RemoveCallback removes a listener for interrupts
-	RemoveCallback(c chan Tick)
-
 	Close(ctx context.Context) error
 }
 
