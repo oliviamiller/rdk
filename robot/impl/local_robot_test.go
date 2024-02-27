@@ -37,6 +37,8 @@ import (
 	"go.viam.com/rdk/components/base"
 	"go.viam.com/rdk/components/board"
 	"go.viam.com/rdk/components/camera"
+	"go.viam.com/rdk/components/encoder"
+	fakeencoder "go.viam.com/rdk/components/encoder/fake"
 	"go.viam.com/rdk/components/generic"
 	"go.viam.com/rdk/components/gripper"
 	"go.viam.com/rdk/components/motor"
@@ -47,6 +49,7 @@ import (
 	"go.viam.com/rdk/examples/customresources/apis/gizmoapi"
 	"go.viam.com/rdk/examples/customresources/apis/summationapi"
 	rgrpc "go.viam.com/rdk/grpc"
+	"go.viam.com/rdk/internal/cloud"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
@@ -80,11 +83,8 @@ func TestConfig1(t *testing.T) {
 	cfg, err := config.Read(context.Background(), "data/cfgtest1.json", logger)
 	test.That(t, err, test.ShouldBeNil)
 
-	r, err := robotimpl.New(context.Background(), cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, context.Background(), cfg, logger)
+	defer shutdown()
 
 	c1, err := camera.FromRobot(r, "c1")
 	test.That(t, err, test.ShouldBeNil)
@@ -102,9 +102,8 @@ func TestConfigFake(t *testing.T) {
 	cfg, err := config.Read(context.Background(), "data/fake.json", logger)
 	test.That(t, err, test.ShouldBeNil)
 
-	r, err := robotimpl.New(context.Background(), cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r.Close(context.Background()), test.ShouldBeNil)
+	_, shutdown := initTestRobot(t, context.Background(), cfg, logger)
+	shutdown()
 }
 
 // this serves as a test for updateWeakDependents as the web service defines a weak
@@ -116,11 +115,8 @@ func TestConfigRemote(t *testing.T) {
 
 	ctx := context.Background()
 
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	options, _, addr := robottestutils.CreateBaseOptionsAndListener(t)
 	err = r.StartWeb(ctx, options)
@@ -177,8 +173,8 @@ func TestConfigRemote(t *testing.T) {
 	}
 
 	ctx2 := context.Background()
-	r2, err := robotimpl.New(ctx2, remoteConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
+	r2, shutdown := initTestRobot(t, ctx2, remoteConfig, logger)
+	defer shutdown()
 
 	expected := []resource.Name{
 		motion.Named(resource.DefaultServiceName),
@@ -306,8 +302,6 @@ func TestConfigRemote(t *testing.T) {
 	fsConfig, err := r2.FrameSystemConfig(context.Background())
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, fsConfig.Parts, test.ShouldHaveLength, 12)
-
-	test.That(t, r2.Close(context.Background()), test.ShouldBeNil)
 }
 
 func TestConfigRemoteWithAuth(t *testing.T) {
@@ -327,11 +321,8 @@ func TestConfigRemoteWithAuth(t *testing.T) {
 	} {
 		t.Run(tc.Case, func(t *testing.T) {
 			ctx := context.Background()
-			r, err := robotimpl.New(ctx, cfg, logger)
-			test.That(t, err, test.ShouldBeNil)
-			defer func() {
-				test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-			}()
+			r, shutdown := initTestRobot(t, ctx, cfg, logger)
+			defer shutdown()
 
 			options, _, addr := robottestutils.CreateBaseOptionsAndListener(t)
 			options.Managed = tc.Managed
@@ -387,11 +378,8 @@ func TestConfigRemoteWithAuth(t *testing.T) {
 				},
 			}
 
-			remoteRobot, err := robotimpl.New(context.Background(), remoteConfig, logger)
-			defer func() {
-				test.That(t, remoteRobot.Close(context.Background()), test.ShouldBeNil)
-			}()
-			test.That(t, err, test.ShouldBeNil)
+			_, shutdown = initTestRobot(t, context.Background(), remoteConfig, logger)
+			defer shutdown()
 
 			remoteConfig.Remotes[0].Auth.Credentials = &rpc.Credentials{
 				Type:    rpc.CredentialsTypeAPIKey,
@@ -405,56 +393,42 @@ func TestConfigRemoteWithAuth(t *testing.T) {
 			var r2 robot.LocalRobot
 			if tc.Managed {
 				remoteConfig.Remotes[0].Auth.Entity = "wrong"
-				managedRemote, err := robotimpl.New(context.Background(), remoteConfig, logger)
-				defer func() {
-					test.That(t, managedRemote.Close(context.Background()), test.ShouldBeNil)
-				}()
-				test.That(t, err, test.ShouldBeNil)
+				_, shutdown = initTestRobot(t, context.Background(), remoteConfig, logger)
+				defer shutdown()
 
 				remoteConfig.AllowInsecureCreds = true
 
-				r3, err := robotimpl.New(context.Background(), remoteConfig, logger)
-				defer func() {
-					test.That(t, r3.Close(context.Background()), test.ShouldBeNil)
-				}()
-				test.That(t, err, test.ShouldBeNil)
-				test.That(t, r3, test.ShouldNotBeNil)
+				r3, shutdown := initTestRobot(t, context.Background(), remoteConfig, logger)
+				defer shutdown()
 				remoteBot, ok := r3.RemoteByName("foo")
 				test.That(t, ok, test.ShouldBeFalse)
 				test.That(t, remoteBot, test.ShouldBeNil)
 
 				remoteConfig.Remotes[0].Auth.Entity = entityName
 				remoteConfig.Remotes[1].Auth.Entity = entityName
-				r2, err = robotimpl.New(context.Background(), remoteConfig, logger)
-				test.That(t, err, test.ShouldBeNil)
-				test.That(t, r2.Close(context.Background()), test.ShouldBeNil)
+				_, shutdown = initTestRobot(t, context.Background(), remoteConfig, logger)
+				shutdown()
 
-				test.That(t, err, test.ShouldBeNil)
 				ctx2 := context.Background()
 				remoteConfig.Remotes[0].Address = options.LocalFQDN
 				if tc.EntityName != "" {
 					remoteConfig.Remotes[1].Address = options.FQDN
 				}
-				r2, err = robotimpl.New(ctx2, remoteConfig, logger)
-				test.That(t, err, test.ShouldBeNil)
+				r2, shutdown = initTestRobot(t, ctx2, remoteConfig, logger)
+				defer shutdown()
 			} else {
-				unmanagedRobot, err := robotimpl.New(context.Background(), remoteConfig, logger)
-				test.That(t, err, test.ShouldBeNil)
-				defer func() {
-					test.That(t, unmanagedRobot.Close(context.Background()), test.ShouldBeNil)
-				}()
+				_, shutdown = initTestRobot(t, context.Background(), remoteConfig, logger)
+				defer shutdown()
 
 				remoteConfig.AllowInsecureCreds = true
 
-				r2, err = robotimpl.New(context.Background(), remoteConfig, logger)
-				test.That(t, err, test.ShouldBeNil)
-				test.That(t, r2.Close(context.Background()), test.ShouldBeNil)
+				_, shutdown := initTestRobot(t, context.Background(), remoteConfig, logger)
+				shutdown()
 
-				test.That(t, err, test.ShouldBeNil)
 				ctx2 := context.Background()
 				remoteConfig.Remotes[0].Address = options.LocalFQDN
-				r2, err = robotimpl.New(ctx2, remoteConfig, logger)
-				test.That(t, err, test.ShouldBeNil)
+				r2, shutdown = initTestRobot(t, ctx2, remoteConfig, logger)
+				defer shutdown()
 
 				_, err = r2.ResourceByName(motion.Named(resource.DefaultServiceName))
 				test.That(t, err, test.ShouldBeNil)
@@ -535,9 +509,6 @@ func TestConfigRemoteWithAuth(t *testing.T) {
 			err = decoder.Decode(statuses[1].Status)
 			test.That(t, err, test.ShouldBeNil)
 			test.That(t, convMap, test.ShouldResemble, armStatus)
-
-			test.That(t, r2.Close(context.Background()), test.ShouldBeNil)
-			test.That(t, r.Close(context.Background()), test.ShouldBeNil)
 		})
 	}
 }
@@ -549,11 +520,8 @@ func TestConfigRemoteWithTLSAuth(t *testing.T) {
 
 	ctx := context.Background()
 
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	altName := primitive.NewObjectID().Hex()
 	cert, certFile, keyFile, certPool, err := testutils.GenerateSelfSignedCertificate("somename", altName)
@@ -615,32 +583,26 @@ func TestConfigRemoteWithTLSAuth(t *testing.T) {
 		},
 	}
 
-	_r, err := robotimpl.New(context.Background(), remoteConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, _r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	_, shutdown = initTestRobot(t, context.Background(), remoteConfig, logger)
+	defer shutdown()
 
 	// use secret
 	remoteConfig.Remotes[0].Auth.Credentials = &rpc.Credentials{
 		Type:    rutils.CredentialsTypeRobotLocationSecret,
 		Payload: locationSecret,
 	}
-	r2, err := robotimpl.New(context.Background(), remoteConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r2.Close(context.Background()), test.ShouldBeNil)
+	_, shutdown = initTestRobot(t, context.Background(), remoteConfig, logger)
+	shutdown()
 
 	// use cert
 	remoteTLSConfig.Certificates = []tls.Certificate{cert}
-	r2, err = robotimpl.New(context.Background(), remoteConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r2.Close(context.Background()), test.ShouldBeNil)
+	_, shutdown = initTestRobot(t, context.Background(), remoteConfig, logger)
+	shutdown()
 
 	// use cert with mDNS
 	remoteConfig.Remotes[0].Address = options.FQDN
-	r2, err = robotimpl.New(context.Background(), remoteConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r2.Close(context.Background()), test.ShouldBeNil)
+	_, shutdown = initTestRobot(t, context.Background(), remoteConfig, logger)
+	shutdown()
 
 	// use signaling creds
 	remoteConfig.Remotes[0].Address = addr
@@ -651,21 +613,18 @@ func TestConfigRemoteWithTLSAuth(t *testing.T) {
 		Type:    rutils.CredentialsTypeRobotLocationSecret,
 		Payload: locationSecret,
 	}
-	r2, err = robotimpl.New(context.Background(), remoteConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r2.Close(context.Background()), test.ShouldBeNil)
+	_, shutdown = initTestRobot(t, context.Background(), remoteConfig, logger)
+	shutdown()
 
 	// use cert with mDNS while signaling present
-	test.That(t, err, test.ShouldBeNil)
 	ctx2 := context.Background()
 	remoteConfig.Remotes[0].Auth.SignalingCreds = &rpc.Credentials{
 		Type:    rutils.CredentialsTypeRobotLocationSecret,
 		Payload: locationSecret + "bad",
 	}
 	remoteConfig.Remotes[0].Address = options.FQDN
-	r2, err = robotimpl.New(ctx2, remoteConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, err, test.ShouldBeNil)
+	r2, shutdown := initTestRobot(t, ctx2, remoteConfig, logger)
+	defer shutdown()
 
 	expected := []resource.Name{
 		motion.Named(resource.DefaultServiceName),
@@ -719,9 +678,6 @@ func TestConfigRemoteWithTLSAuth(t *testing.T) {
 	err = decoder.Decode(statuses[0].Status)
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, convMap, test.ShouldResemble, armStatus)
-
-	test.That(t, r2.Close(context.Background()), test.ShouldBeNil)
-	test.That(t, r.Close(context.Background()), test.ShouldBeNil)
 }
 
 type dummyArm struct {
@@ -812,11 +768,8 @@ func TestStopAll(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 
 	ctx := context.Background()
-	r, err := robotimpl.New(ctx, cfg, logger)
-	defer func() {
-		test.That(t, r.Close(ctx), test.ShouldBeNil)
-	}()
-	test.That(t, err, test.ShouldBeNil)
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	test.That(t, dummyArm1.stopCount, test.ShouldEqual, 0)
 	test.That(t, dummyArm2.stopCount, test.ShouldEqual, 0)
@@ -939,10 +892,8 @@ func TestNewTeardown(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 
 	ctx := context.Background()
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	err = r.Close(ctx)
-	test.That(t, err, test.ShouldBeNil)
+	_, shutdown := initTestRobot(t, ctx, cfg, logger)
+	shutdown()
 	test.That(t, dummyBoard1.closeCount, test.ShouldEqual, 1)
 }
 
@@ -953,8 +904,8 @@ func TestMetadataUpdate(t *testing.T) {
 
 	ctx := context.Background()
 
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	resources := r.ResourceNames()
 	test.That(t, err, test.ShouldBeNil)
@@ -989,8 +940,8 @@ func TestSensorsService(t *testing.T) {
 	cfg, err := config.Read(context.Background(), "data/fake.json", logger)
 	test.That(t, err, test.ShouldBeNil)
 
-	r, err := robotimpl.New(context.Background(), cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
+	r, shutdown := initTestRobot(t, context.Background(), cfg, logger)
+	defer shutdown()
 
 	svc, err := sensors.FromRobot(r, resource.DefaultServiceName)
 	test.That(t, err, test.ShouldBeNil)
@@ -1009,8 +960,6 @@ func TestSensorsService(t *testing.T) {
 	readings, err = svc.Readings(context.Background(), sensorNames, map[string]interface{}{})
 	test.That(t, err, test.ShouldBeNil)
 	test.That(t, len(readings), test.ShouldEqual, 2)
-
-	test.That(t, r.Close(context.Background()), test.ShouldBeNil)
 }
 
 func TestStatusService(t *testing.T) {
@@ -1018,8 +967,8 @@ func TestStatusService(t *testing.T) {
 	cfg, err := config.Read(context.Background(), "data/fake.json", logger)
 	test.That(t, err, test.ShouldBeNil)
 
-	r, err := robotimpl.New(context.Background(), cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
+	r, shutdown := initTestRobot(t, context.Background(), cfg, logger)
+	defer shutdown()
 
 	resourceNames := []resource.Name{arm.Named("pieceArm"), movementsensor.Named("movement_sensor1")}
 	rArm, err := arm.FromRobot(r, "pieceArm")
@@ -1046,7 +995,6 @@ func TestStatusService(t *testing.T) {
 	for idx := 0; idx < expectedStatusLength; idx++ {
 		test.That(t, statuses[idx].Status, test.ShouldResemble, expected[statuses[idx].Name])
 	}
-	test.That(t, r.Close(context.Background()), test.ShouldBeNil)
 }
 
 func TestStatus(t *testing.T) {
@@ -1295,11 +1243,8 @@ func TestStatusRemote(t *testing.T) {
 	}
 	test.That(t, remoteConfig.Ensure(false, logger), test.ShouldBeNil)
 	ctx := context.Background()
-	r, err := robotimpl.New(ctx, remoteConfig, logger)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
-	test.That(t, err, test.ShouldBeNil)
+	r, shutdown := initTestRobot(t, ctx, remoteConfig, logger)
+	defer shutdown()
 
 	test.That(
 		t,
@@ -1374,13 +1319,10 @@ func TestGetRemoteResourceAndGrandFather(t *testing.T) {
 		Remotes:  []config.Remote{},
 	}
 
-	r0, err := robotimpl.New(ctx, remoteRemoteConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r0.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r0, shutdown := initTestRobot(t, ctx, remoteRemoteConfig, logger)
+	defer shutdown()
 
-	err = r0.StartWeb(ctx, options)
+	err := r0.StartWeb(ctx, options)
 	test.That(t, err, test.ShouldBeNil)
 
 	r0arm1, err := r0.ResourceByName(arm.Named("arm1"))
@@ -1409,19 +1351,13 @@ func TestGetRemoteResourceAndGrandFather(t *testing.T) {
 		Name:    "foo",
 		Address: addr1,
 	})
-	r1, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r1.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r1, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 	err = r1.StartWeb(ctx, options)
 	test.That(t, err, test.ShouldBeNil)
 
-	r, err := robotimpl.New(ctx, remoteConfig, logger)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
-	test.That(t, err, test.ShouldBeNil)
+	r, shutdown := initTestRobot(t, ctx, remoteConfig, logger)
+	defer shutdown()
 
 	test.That(
 		t,
@@ -1506,12 +1442,9 @@ func TestValidationErrorOnReconfigure(t *testing.T) {
 		}},
 		Cloud: &config.Cloud{},
 	}
-	r, err := robotimpl.New(ctx, badConfig, logger)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r, test.ShouldNotBeNil)
+	r, shutdown := initTestRobot(t, ctx, badConfig, logger)
+	defer shutdown()
+
 	// Test Component Error
 	name := base.Named("test")
 	noBase, err := r.ResourceByName(name)
@@ -1560,14 +1493,11 @@ func TestConfigStartsInvalidReconfiguresValid(t *testing.T) {
 		}},
 	}
 	test.That(t, badConfig.Ensure(false, logger), test.ShouldBeNil)
-	r, err := robotimpl.New(ctx, badConfig, logger)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r, test.ShouldNotBeNil)
+	r, shutdown := initTestRobot(t, ctx, badConfig, logger)
+	defer shutdown()
+
 	options1, _, addr1 := robottestutils.CreateBaseOptionsAndListener(t)
-	err = r.StartWeb(context.Background(), options1)
+	err := r.StartWeb(context.Background(), options1)
 	test.That(t, err, test.ShouldBeNil)
 
 	goodConfig := &config.Config{
@@ -1648,14 +1578,10 @@ func TestConfigStartsValidReconfiguresInvalid(t *testing.T) {
 		Components: []resource.Config{armConfig},
 	}
 
-	robotRemote, err := robotimpl.New(ctx, &cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, robotRemote, test.ShouldNotBeNil)
-	defer func() {
-		test.That(t, robotRemote.Close(context.Background()), test.ShouldBeNil)
-	}()
+	robotRemote, shutdown := initTestRobot(t, ctx, &cfg, logger)
+	defer shutdown()
 	options1, _, addr1 := robottestutils.CreateBaseOptionsAndListener(t)
-	err = robotRemote.StartWeb(context.Background(), options1)
+	err := robotRemote.StartWeb(context.Background(), options1)
 	test.That(t, err, test.ShouldBeNil)
 
 	goodConfig := &config.Config{
@@ -1681,12 +1607,8 @@ func TestConfigStartsValidReconfiguresInvalid(t *testing.T) {
 		}},
 	}
 	test.That(t, goodConfig.Ensure(false, logger), test.ShouldBeNil)
-	r, err := robotimpl.New(ctx, goodConfig, logger)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r, test.ShouldNotBeNil)
+	r, shutdown := initTestRobot(t, ctx, goodConfig, logger)
+	defer shutdown()
 
 	badConfig := &config.Config{
 		Components: []resource.Config{
@@ -1788,12 +1710,8 @@ func TestResourceStartsOnReconfigure(t *testing.T) {
 		},
 	}
 	test.That(t, goodConfig.Ensure(false, logger), test.ShouldBeNil)
-	r, err := robotimpl.New(ctx, badConfig, logger)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r, test.ShouldNotBeNil)
+	r, shutdown := initTestRobot(t, ctx, badConfig, logger)
+	defer shutdown()
 
 	noBase, err := r.ResourceByName(base.Named("fake0"))
 	test.That(
@@ -1824,8 +1742,7 @@ func TestResourceStartsOnReconfigure(t *testing.T) {
 
 func TestConfigProcess(t *testing.T) {
 	logger, logs := logging.NewObservedTestLogger(t)
-
-	r, err := robotimpl.New(context.Background(), &config.Config{
+	_, shutdown := initTestRobot(t, context.Background(), &config.Config{
 		Processes: []pexec.ProcessConfig{
 			{
 				ID:      "1",
@@ -1836,8 +1753,7 @@ func TestConfigProcess(t *testing.T) {
 			},
 		},
 	}, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, r.Close(context.Background()), test.ShouldBeNil)
+	shutdown()
 	test.That(t, logs.FilterField(zap.String("output", "heythere\n")).Len(), test.ShouldEqual, 1)
 }
 
@@ -1865,11 +1781,8 @@ func TestConfigPackages(t *testing.T) {
 		PackagePath: packageDir,
 	}
 
-	r, err := robotimpl.New(ctx, robotConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, robotConfig, logger)
+	defer shutdown()
 
 	_, err = r.PackageManager().PackagePath("some-name-1")
 	test.That(t, err, test.ShouldEqual, packages.ErrPackageMissing)
@@ -1941,11 +1854,8 @@ func TestConfigMethod(t *testing.T) {
 	complexPath, err := rtestutils.BuildTempModule(t, "examples/customresources/demos/complexmodule")
 	test.That(t, err, test.ShouldBeNil)
 
-	r, err := robotimpl.New(context.Background(), &config.Config{}, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, context.Background(), &config.Config{}, logger)
+	defer shutdown()
 
 	// Assert that Config method returns the three default services: data_manager,
 	// motion and sensors.
@@ -1962,11 +1872,9 @@ func TestConfigMethod(t *testing.T) {
 	// will be returned by Config.
 	remoteCfg, err := config.Read(context.Background(), "data/remote_fake.json", logger)
 	test.That(t, err, test.ShouldBeNil)
-	remoteRobot, err := robotimpl.New(ctx, remoteCfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, remoteRobot.Close(context.Background()), test.ShouldBeNil)
-	}()
+	remoteRobot, shutdown := initTestRobot(t, ctx, remoteCfg, logger)
+	defer shutdown()
+
 	options, _, addr := robottestutils.CreateBaseOptionsAndListener(t)
 	err = remoteRobot.StartWeb(ctx, options)
 	test.That(t, err, test.ShouldBeNil)
@@ -2123,13 +2031,9 @@ func TestReconnectRemote(t *testing.T) {
 		Components: []resource.Config{armConfig},
 	}
 
-	robot, err := robotimpl.New(ctx, &cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, robot, test.ShouldNotBeNil)
-	defer func() {
-		test.That(t, robot.Close(context.Background()), test.ShouldBeNil)
-	}()
-	err = robot.StartWeb(ctx, options)
+	robot, shutdown := initTestRobot(t, ctx, &cfg, logger)
+	defer shutdown()
+	err := robot.StartWeb(ctx, options)
 	test.That(t, err, test.ShouldBeNil)
 
 	// start the second robot
@@ -2146,12 +2050,8 @@ func TestReconnectRemote(t *testing.T) {
 		Remotes: []config.Remote{remoteConf},
 	}
 
-	robot1, err := robotimpl.New(ctx, &cfg1, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, robot, test.ShouldNotBeNil)
-	defer func() {
-		test.That(t, robot1.Close(context.Background()), test.ShouldBeNil)
-	}()
+	robot1, shutdown := initTestRobot(t, ctx, &cfg1, logger)
+	defer shutdown()
 
 	err = robot1.StartWeb(ctx1, options1)
 	test.That(t, err, test.ShouldBeNil)
@@ -2237,13 +2137,9 @@ func TestReconnectRemoteChangeConfig(t *testing.T) {
 		Components: []resource.Config{armConfig},
 	}
 
-	robot, err := robotimpl.New(ctx, &cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, robot, test.ShouldNotBeNil)
-	defer func() {
-		test.That(t, robot.Close(context.Background()), test.ShouldBeNil)
-	}()
-	err = robot.StartWeb(ctx, options)
+	robot, shutdown := initTestRobot(t, ctx, &cfg, logger)
+	defer shutdown()
+	err := robot.StartWeb(ctx, options)
 	test.That(t, err, test.ShouldBeNil)
 
 	// start the second robot
@@ -2259,12 +2155,8 @@ func TestReconnectRemoteChangeConfig(t *testing.T) {
 		Remotes: []config.Remote{remoteConf},
 	}
 
-	robot1, err := robotimpl.New(ctx, &cfg1, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, robot, test.ShouldNotBeNil)
-	defer func() {
-		test.That(t, robot1.Close(context.Background()), test.ShouldBeNil)
-	}()
+	robot1, shutdown := initTestRobot(t, ctx, &cfg1, logger)
+	defer shutdown()
 
 	err = robot1.StartWeb(ctx1, options1)
 	test.That(t, err, test.ShouldBeNil)
@@ -2321,9 +2213,8 @@ func TestReconnectRemoteChangeConfig(t *testing.T) {
 	options = weboptions.New()
 	options.Network.BindAddress = ""
 	options.Network.Listener = listener
-	robot, err = robotimpl.New(ctx, &cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	test.That(t, robot, test.ShouldNotBeNil)
+	robot, shutdown = initTestRobot(t, ctx, &cfg, logger)
+	defer shutdown()
 	err = robot.StartWeb(ctx2, options)
 	test.That(t, err, test.ShouldBeNil)
 
@@ -2382,11 +2273,8 @@ func TestCheckMaxInstanceValid(t *testing.T) {
 			},
 		},
 	}
-	r, err := robotimpl.New(context.Background(), cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, context.Background(), cfg, logger)
+	defer shutdown()
 	res, err := r.ResourceByName(motion.Named("fake1"))
 	test.That(t, res, test.ShouldNotBeNil)
 	test.That(t, err, test.ShouldBeNil)
@@ -2435,11 +2323,8 @@ func TestCheckMaxInstanceInvalid(t *testing.T) {
 			},
 		},
 	}
-	r, err := robotimpl.New(context.Background(), cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, context.Background(), cfg, logger)
+	defer shutdown()
 	maxInstance := 0
 	for _, name := range r.ResourceNames() {
 		if name.API == datamanager.API {
@@ -2462,13 +2347,10 @@ func TestCheckMaxInstanceSkipRemote(t *testing.T) {
 	ctx := context.Background()
 	logger := logging.NewTestLogger(t)
 
-	r0, err := robotimpl.New(ctx, &config.Config{}, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r0.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r0, shutdown := initTestRobot(t, ctx, &config.Config{}, logger)
+	defer shutdown()
 
-	err = r0.StartWeb(ctx, options)
+	err := r0.StartWeb(ctx, options)
 	test.That(t, err, test.ShouldBeNil)
 
 	remoteConfig := &config.Config{
@@ -2492,11 +2374,8 @@ func TestCheckMaxInstanceSkipRemote(t *testing.T) {
 		},
 	}
 
-	r, err := robotimpl.New(ctx, remoteConfig, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, remoteConfig, logger)
+	defer shutdown()
 
 	maxInstance := 0
 	for _, name := range r.ResourceNames() {
@@ -2545,11 +2424,8 @@ func TestDependentResources(t *testing.T) {
 			},
 		},
 	}
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	// Assert that removing base 'b' removes motors 'm' and 'm1' and slam service 's'.
 	cfg2 := &config.Config{
@@ -2629,11 +2505,8 @@ func TestOrphanedResources(t *testing.T) {
 	summationAPI := resource.APINamespace("acme").WithServiceType("summation")
 	helperModel := resource.NewModel("rdk", "test", "helper")
 
-	r, err := robotimpl.New(ctx, &config.Config{}, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, &config.Config{}, logger)
+	defer shutdown()
 
 	t.Run("manual reconfiguration", func(t *testing.T) {
 		cfg := &config.Config{
@@ -2926,11 +2799,8 @@ func TestDependentAndOrphanedResources(t *testing.T) {
 		},
 	}
 	test.That(t, cfg.Ensure(false, logger), test.ShouldBeNil)
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	// Assert that reconfiguring module 'mod' to a new module that does not handle
 	// 'g' removes modular component 'g' and its dependent 'd' and leaves 'm' as-is.
@@ -3047,11 +2917,8 @@ func TestModuleDebugReconfigure(t *testing.T) {
 			},
 		},
 	}
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	time.Sleep(2 * time.Second)
 	test.That(t, logs.FilterMessageSnippet("debug mode enabled").Len(),
@@ -3092,11 +2959,8 @@ func TestResourcelessModuleRemove(t *testing.T) {
 			},
 		},
 	}
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	// Reconfigure to an empty config and assert that the testmodule process
 	// is stopped.
@@ -3133,11 +2997,8 @@ func TestCrashedModuleReconfigure(t *testing.T) {
 			},
 		},
 	}
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	_, err = r.ResourceByName(generic.Named("h"))
 	test.That(t, err, test.ShouldBeNil)
@@ -3225,11 +3086,8 @@ func TestImplicitDepsAcrossModules(t *testing.T) {
 			},
 		},
 	}
-	r, err := robotimpl.New(ctx, cfg, logger)
-	test.That(t, err, test.ShouldBeNil)
-	defer func() {
-		test.That(t, r.Close(context.Background()), test.ShouldBeNil)
-	}()
+	r, shutdown := initTestRobot(t, ctx, cfg, logger)
+	defer shutdown()
 
 	_, err = r.ResourceByName(base.Named("b"))
 	test.That(t, err, test.ShouldBeNil)
@@ -3237,4 +3095,177 @@ func TestImplicitDepsAcrossModules(t *testing.T) {
 	test.That(t, err, test.ShouldBeNil)
 	_, err = r.ResourceByName(motor.Named("m2"))
 	test.That(t, err, test.ShouldBeNil)
+}
+
+func TestResourceByNameAcrossRemotes(t *testing.T) {
+	ctx := context.Background()
+	logger := logging.NewTestLogger(t)
+
+	// Setup a robot1 -> robot2 -> robot3 -> robot4 remote chain. Ensure that if
+	// robot4 has an encoder "e", all robots in the chain can retrieve it by
+	// simple name "e" or short name "[remote-prefix]:e". Also ensure that a
+	// motor "m1" on robot1 can depend on "robot2:robot3:robot4:e" and a motor
+	// "m2" on robot2 can depend on "e".
+
+	startWeb := func(r robot.LocalRobot) string {
+		var boundAddress string
+		for i := 0; i < 10; i++ {
+			port, err := utils.TryReserveRandomPort()
+			test.That(t, err, test.ShouldBeNil)
+
+			options := weboptions.New()
+			boundAddress = fmt.Sprintf("localhost:%v", port)
+			options.Network.BindAddress = boundAddress
+			if err := r.StartWeb(ctx, options); err != nil {
+				r.StopWeb()
+				if strings.Contains(err.Error(), "address already in use") {
+					logger.Infow("port in use; restarting on new port", "port", port, "err", err)
+					continue
+				}
+				t.Fatalf("StartWeb error: %v", err)
+			}
+			break
+		}
+		return boundAddress
+	}
+
+	cfg4 := &config.Config{
+		Components: []resource.Config{
+			{
+				Name:                "e",
+				Model:               resource.DefaultModelFamily.WithModel("fake"),
+				API:                 encoder.API,
+				ConvertedAttributes: &fakeencoder.Config{},
+			},
+		},
+	}
+	robot4, shutdown := initTestRobot(t, ctx, cfg4, logger)
+	defer shutdown()
+	addr4 := startWeb(robot4)
+	test.That(t, addr4, test.ShouldNotBeBlank)
+
+	cfg3 := &config.Config{
+		Remotes: []config.Remote{
+			{
+				Name:    "robot4",
+				Address: addr4,
+			},
+		},
+	}
+	robot3, shutdown := initTestRobot(t, ctx, cfg3, logger)
+	defer shutdown()
+	addr3 := startWeb(robot3)
+	test.That(t, addr3, test.ShouldNotBeBlank)
+
+	cfg2 := &config.Config{
+		Remotes: []config.Remote{
+			{
+				Name:    "robot3",
+				Address: addr3,
+			},
+		},
+		Components: []resource.Config{
+			{
+				Name:                "m2",
+				Model:               resource.DefaultModelFamily.WithModel("fake"),
+				API:                 motor.API,
+				ConvertedAttributes: &fakemotor.Config{},
+				// ensure DependsOn works with simple name (implicit remotes)
+				DependsOn: []string{"e"},
+			},
+		},
+	}
+	robot2, shutdown := initTestRobot(t, ctx, cfg2, logger)
+	defer shutdown()
+	addr2 := startWeb(robot2)
+	test.That(t, addr2, test.ShouldNotBeBlank)
+
+	cfg1 := &config.Config{
+		Remotes: []config.Remote{
+			{
+				Name:    "robot2",
+				Address: addr2,
+			},
+		},
+		Components: []resource.Config{
+			{
+				Name:                "m1",
+				Model:               resource.DefaultModelFamily.WithModel("fake"),
+				API:                 motor.API,
+				ConvertedAttributes: &fakemotor.Config{},
+				// ensure DependsOn works with short name (explicit remotes)
+				DependsOn: []string{"robot2:robot3:robot4:e"},
+			},
+		},
+	}
+	robot1, shutdown := initTestRobot(t, ctx, cfg1, logger)
+	defer shutdown()
+
+	// Ensure that "e" can be retrieved by short and simple names from all
+	// robots. Also ensure "m1" and "m2" can be retrieved from robot1 and robot2
+	// (they built properly).
+
+	_, err := robot4.ResourceByName(encoder.Named("e"))
+	test.That(t, err, test.ShouldBeNil)
+
+	_, err = robot3.ResourceByName(encoder.Named("e"))
+	test.That(t, err, test.ShouldBeNil)
+	_, err = robot3.ResourceByName(encoder.Named("robot4:e"))
+	test.That(t, err, test.ShouldBeNil)
+
+	_, err = robot2.ResourceByName(encoder.Named("e"))
+	test.That(t, err, test.ShouldBeNil)
+	_, err = robot2.ResourceByName(encoder.Named("robot3:robot4:e"))
+	test.That(t, err, test.ShouldBeNil)
+	_, err = robot2.ResourceByName(motor.Named("m2"))
+	test.That(t, err, test.ShouldBeNil)
+
+	_, err = robot1.ResourceByName(encoder.Named("e"))
+	test.That(t, err, test.ShouldBeNil)
+	_, err = robot1.ResourceByName(encoder.Named("robot2:robot3:robot4:e"))
+	test.That(t, err, test.ShouldBeNil)
+	_, err = robot1.ResourceByName(motor.Named("m1"))
+	test.That(t, err, test.ShouldBeNil)
+}
+
+func TestCloudMetadata(t *testing.T) {
+	logger := logging.NewTestLogger(t)
+	ctx := context.Background()
+	t.Run("no cloud data", func(t *testing.T) {
+		cfg := &config.Config{}
+		robot, shutdown := initTestRobot(t, ctx, cfg, logger)
+		defer shutdown()
+		_, err := robot.GetCloudMetadata(ctx)
+		test.That(t, err, test.ShouldBeError, errors.New("cloud metadata not available"))
+	})
+	t.Run("with cloud data", func(t *testing.T) {
+		cfg := &config.Config{
+			Cloud: &config.Cloud{
+				ID:           "the-robot-part",
+				LocationID:   "the-location",
+				PrimaryOrgID: "the-primary-org",
+			},
+		}
+		robot, shutdown := initTestRobot(t, ctx, cfg, logger)
+		defer shutdown()
+		md, err := robot.GetCloudMetadata(ctx)
+		test.That(t, err, test.ShouldBeNil)
+		test.That(t, md, test.ShouldResemble, cloud.Metadata{
+			RobotPartID:  "the-robot-part",
+			PrimaryOrgID: "the-primary-org",
+			LocationID:   "the-location",
+		})
+	})
+}
+
+//revive:disable-next-line:context-as-argument
+func initTestRobot(t *testing.T, ctx context.Context, cfg *config.Config, logger logging.Logger) (robot.LocalRobot, func()) {
+	t.Helper()
+
+	r, err := robotimpl.New(ctx, cfg, logger)
+	test.That(t, r, test.ShouldNotBeNil)
+	test.That(t, err, test.ShouldBeNil)
+	return r, func() {
+		test.That(t, r.Close(ctx), test.ShouldBeNil)
+	}
 }

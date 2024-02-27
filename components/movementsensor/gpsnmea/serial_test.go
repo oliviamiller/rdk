@@ -8,6 +8,7 @@ import (
 	"go.viam.com/test"
 
 	"go.viam.com/rdk/components/movementsensor"
+	"go.viam.com/rdk/components/movementsensor/rtkutils"
 	"go.viam.com/rdk/logging"
 	"go.viam.com/rdk/resource"
 	rutils "go.viam.com/rdk/utils"
@@ -21,7 +22,6 @@ var (
 	totalSats  = 2
 	hAcc       = 0.7
 	vAcc       = 0.8
-	valid      = true
 	fix        = 1
 )
 
@@ -81,12 +81,12 @@ func TestReadingsSerial(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 	ctx := context.Background()
 	cancelCtx, cancelFunc := context.WithCancel(ctx)
-	g := &SerialNMEAMovementSensor{
+	g := &NMEAMovementSensor{
 		cancelCtx:  cancelCtx,
 		cancelFunc: cancelFunc,
 		logger:     logger,
 	}
-	g.data = GPSData{
+	g.data = rtkutils.GPSData{
 		Location:   loc,
 		Alt:        alt,
 		Speed:      speed,
@@ -94,7 +94,6 @@ func TestReadingsSerial(t *testing.T) {
 		HDOP:       hAcc,
 		SatsInView: totalSats,
 		SatsInUse:  activeSats,
-		valid:      valid,
 		FixQuality: fix,
 	}
 
@@ -116,7 +115,7 @@ func TestCloseSerial(t *testing.T) {
 	logger := logging.NewTestLogger(t)
 	ctx := context.Background()
 	cancelCtx, cancelFunc := context.WithCancel(ctx)
-	g := &SerialNMEAMovementSensor{
+	g := &NMEAMovementSensor{
 		cancelCtx:  cancelCtx,
 		cancelFunc: cancelFunc,
 		logger:     logger,

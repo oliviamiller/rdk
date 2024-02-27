@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/geo/r3"
 	"github.com/pkg/errors"
 	goutils "go.viam.com/utils"
 
@@ -61,8 +60,7 @@ const (
 type moveRequest struct {
 	requestType requestType
 	// geoPoseOrigin is only set if requestType == requestTypeMoveOnGlobe
-	geoPoseOrigin spatialmath.GeoPose
-	// poseOrigin is only set if requestType == requestTypeMoveOnMap
+	geoPoseOrigin     *spatialmath.GeoPose
 	poseOrigin        spatialmath.Pose
 	logger            logging.Logger
 	config            *validatedMotionConfiguration
@@ -83,10 +81,10 @@ type moveRequest struct {
 }
 
 // plan creates a plan using the currentInputs of the robot and the moveRequest's planRequest.
-func (mr *moveRequest) Plan(ctx context.Context) (state.PlanResponse, error) {
+func (mr *moveRequest) Plan(ctx context.Context) (motionplan.Plan, error) {
 	inputs, err := mr.kinematicBase.CurrentInputs(ctx)
 	if err != nil {
-		return state.PlanResponse{}, err
+		return nil, err
 	}
 	// TODO: this is really hacky and we should figure out a better place to store this information
 	if len(mr.kinematicBase.Kinematics().DoF()) == 2 {
@@ -94,58 +92,61 @@ func (mr *moveRequest) Plan(ctx context.Context) (state.PlanResponse, error) {
 	}
 	mr.planRequest.StartConfiguration = map[string][]referenceframe.Input{mr.kinematicBase.Kinematics().Name(): inputs}
 
+	// get existing elements of the worldstate
+	existingGifs, err := mr.planRequest.WorldState.ObstaclesInWorldFrame(mr.planRequest.FrameSystem, mr.planRequest.StartConfiguration)
+	if err != nil {
+		return nil, err
+	}
+
+	// get transient detections
+	gifs := []*referenceframe.GeometriesInFrame{}
+	for visSrvc, cameraNames := range mr.obstacleDetectors {
+		for _, camName := range cameraNames {
+			relativeGIFs, err := mr.getTransientDetections(ctx, visSrvc, camName, spatialmath.NewZeroPose())
+			if err != nil {
+				return nil, err
+			}
+			gifs = append(gifs, relativeGIFs)
+		}
+	}
+	gifs = append(gifs, existingGifs)
+
+	// update worldstate to include transient detections
+	planRequestCopy := *mr.planRequest
+	planRequestCopy.WorldState, err = referenceframe.NewWorldState(gifs, nil)
+	if err != nil {
+		return nil, err
+	}
+
 	// TODO(RSDK-5634): this should pass in mr.seedplan and the appropriate replanCostFactor once this bug is found and fixed.
-	plan, err := motionplan.Replan(ctx, mr.planRequest, nil, 0)
+	plan, err := motionplan.Replan(ctx, &planRequestCopy, nil, 0)
 	if err != nil {
-		return state.PlanResponse{}, err
+		return nil, err
 	}
+	return motionplan.OffsetPlan(plan, mr.poseOrigin), nil
+}
 
-	waypoints, err := plan.GetFrameSteps(mr.kinematicBase.Kinematics().Name())
-	if err != nil {
-		return state.PlanResponse{}, err
-	}
+func (mr *moveRequest) Execute(ctx context.Context, plan motionplan.Plan) (state.ExecuteResponse, error) {
+	defer mr.executeBackgroundWorkers.Wait()
+	cancelCtx, cancelFn := context.WithCancel(ctx)
+	defer cancelFn()
 
-	switch mr.requestType {
-	case requestTypeMoveOnMap:
-		planSteps, err := motionplan.PlanToPlanSteps(plan, mr.kinematicBase.Name(), *mr.planRequest, mr.poseOrigin)
-		if err != nil {
-			return state.PlanResponse{}, err
-		}
+	mr.start(cancelCtx, plan)
+	return mr.listen(cancelCtx)
+}
 
-		return state.PlanResponse{
-			Waypoints:        waypoints,
-			Motionplan:       plan,
-			PosesByComponent: planSteps,
-		}, nil
-	case requestTypeMoveOnGlobe:
-		// safe to use mr.poseOrigin since it is nil for requestTypeMoveOnGlobe
-		planSteps, err := motionplan.PlanToPlanSteps(plan, mr.kinematicBase.Name(), *mr.planRequest, mr.poseOrigin)
-		if err != nil {
-			return state.PlanResponse{}, err
-		}
-		geoPoses := motionplan.PlanStepsToGeoPoses(planSteps, mr.kinematicBase.Name(), mr.geoPoseOrigin)
-
-		// NOTE: Here we are smuggling GeoPoses into Poses by component
-		planSteps, err = toGeoPosePlanSteps(planSteps, geoPoses)
-		if err != nil {
-			return state.PlanResponse{}, err
-		}
-
-		return state.PlanResponse{
-			Waypoints:        waypoints,
-			Motionplan:       plan,
-			PosesByComponent: planSteps,
-		}, nil
-	case requestTypeUnspecified:
-		fallthrough
-	default:
-		return state.PlanResponse{}, fmt.Errorf("invalid moveRequest.requestType: %d", mr.requestType)
-	}
+func (mr *moveRequest) AnchorGeoPose() *spatialmath.GeoPose {
+	return mr.geoPoseOrigin
 }
 
 // execute attempts to follow a given Plan starting from the index percribed by waypointIndex.
 // Note that waypointIndex is an atomic int that is incremented in this function after each waypoint has been successfully reached.
-func (mr *moveRequest) execute(ctx context.Context, waypoints state.Waypoints, waypointIndex *atomic.Int32) (state.ExecuteResponse, error) {
+func (mr *moveRequest) execute(ctx context.Context, plan motionplan.Plan, waypointIndex *atomic.Int32) (state.ExecuteResponse, error) {
+	waypoints, err := plan.Trajectory().GetFrameInputs(mr.kinematicBase.Name().ShortName())
+	if err != nil {
+		return state.ExecuteResponse{}, err
+	}
+
 	// Iterate through the list of waypoints and issue a command to move to each
 	for i := int(waypointIndex.Load()); i < len(waypoints); i++ {
 		select {
@@ -171,13 +172,13 @@ func (mr *moveRequest) execute(ctx context.Context, waypoints state.Waypoints, w
 		}
 	}
 	// the plan has been fully executed so check to see if where we are at is close enough to the goal.
-	return mr.deviatedFromPlan(ctx, waypoints, len(waypoints)-1)
+	return mr.deviatedFromPlan(ctx, plan, len(waypoints)-1)
 }
 
-// deviatedFromPlan takes a list of waypoints and an index of a waypoint on that Plan and returns whether or not it is still
+// deviatedFromPlan takes a plan and an index of a waypoint on that Plan and returns whether or not it is still
 // following the plan as described by the PlanDeviation specified for the moveRequest.
-func (mr *moveRequest) deviatedFromPlan(ctx context.Context, waypoints state.Waypoints, waypointIndex int) (state.ExecuteResponse, error) {
-	errorState, err := mr.kinematicBase.ErrorState(ctx, waypoints, waypointIndex)
+func (mr *moveRequest) deviatedFromPlan(ctx context.Context, plan motionplan.Plan, waypointIndex int) (state.ExecuteResponse, error) {
+	errorState, err := mr.kinematicBase.ErrorState(ctx, plan, waypointIndex)
 	if err != nil {
 		return state.ExecuteResponse{}, err
 	}
@@ -189,105 +190,144 @@ func (mr *moveRequest) deviatedFromPlan(ctx context.Context, waypoints state.Way
 	return state.ExecuteResponse{}, nil
 }
 
+// getTransientDetections returns a list of geometries as observed by the provided vision service and camera.
+// Depending on the caller, the geometries returned are either in their relative position
+// with respect to the base or in their absolute position with respect to the world.
+func (mr *moveRequest) getTransientDetections(
+	ctx context.Context,
+	visSrvc vision.Service,
+	camName resource.Name,
+	transformBy spatialmath.Pose,
+) (*referenceframe.GeometriesInFrame, error) {
+	mr.logger.CDebugf(ctx,
+		"proceeding to get detections from vision service: %s with camera: %s",
+		visSrvc.Name().ShortName(),
+		camName.ShortName(),
+	)
+
+	detections, err := visSrvc.GetObjectPointClouds(ctx, camName.Name, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	cameraOrigin := referenceframe.NewPoseInFrame(camName.ShortName(), spatialmath.NewZeroPose())
+	cameraToBase, err := mr.fsService.TransformPose(ctx, cameraOrigin, mr.kinematicBase.Name().ShortName(), nil)
+	if err != nil {
+		mr.logger.CDebugf(ctx,
+			"we assume the base named: %s is coincident with the camera named: %s due to err: %v",
+			mr.kinematicBase.Name().ShortName(), camName.ShortName(), err.Error(),
+		)
+		cameraToBase = cameraOrigin
+	}
+
+	// transformed detections
+	transformedGeoms := []spatialmath.Geometry{}
+	for i, detection := range detections {
+		geometry := detection.Geometry
+		// update the label of the geometry so we know it is transient
+		label := camName.ShortName() + "_transientObstacle_" + strconv.Itoa(i)
+		if geometry.Label() != "" {
+			label += "_" + geometry.Label()
+		}
+		geometry.SetLabel(label)
+
+		// transform the geometry to be relative to the base frame which is +Y forwards
+		relativeGeom := geometry.Transform(cameraToBase.Pose())
+
+		// apply any transformation on the geometry defined a priori by the caller
+		transformedGeom := relativeGeom.Transform(transformBy)
+		transformedGeoms = append(transformedGeoms, transformedGeom)
+	}
+	return referenceframe.NewGeometriesInFrame(referenceframe.World, transformedGeoms), nil
+}
+
+// obstaclesIntersectPlan takes a list of waypoints and an index of a waypoint on that Plan and reports an error indicating
+// whether or not any obstacle detectors report geometries in positions which would cause a collision with the executor
+// following the Plan.
 func (mr *moveRequest) obstaclesIntersectPlan(
 	ctx context.Context,
-	waypoints state.Waypoints,
+	plan motionplan.Plan,
 	waypointIndex int,
 ) (state.ExecuteResponse, error) {
-	var plan motionplan.Plan
-	// We only care to check against waypoints we have not reached yet.
-	for _, inputs := range waypoints[waypointIndex:] {
-		input := make(map[string][]referenceframe.Input)
-		input[mr.kinematicBase.Name().Name] = inputs
-		plan = append(plan, input)
+	// check no obstacles intersect the portion of the plan which has yet to be executed
+	remainingPlan, err := motionplan.RemainingPlan(plan, waypointIndex)
+	if err != nil {
+		return state.ExecuteResponse{}, err
+	}
+
+	// if the camera is mounted on something InputEnabled that isn't the base, then that
+	// input needs to be known in order to properly calculate the pose of the obstacle
+	// furthermore, if that InputEnabled thing has moved since this moveRequest was initialized
+	// (due to some other non-motion call for example), then we can't just get current inputs
+	// we need the original input to place that thing in its original position
+	// hence, cached CurrentInputs from the start are used i.e. mr.planRequest.StartConfiguration
+	existingGifs, err := mr.planRequest.WorldState.ObstaclesInWorldFrame(
+		mr.planRequest.FrameSystem, mr.planRequest.StartConfiguration,
+	)
+	if err != nil {
+		return state.ExecuteResponse{}, err
+	}
+	// existingGifs are in their relative position, i.e. with respect to the base frame
+	// here we transform them into their absolute positions. i.e. with respect to the world frame
+	existingGeoms := []spatialmath.Geometry{}
+	for _, g := range existingGifs.Geometries() {
+		existingGeoms = append(existingGeoms, g.Transform(mr.poseOrigin))
+	}
+	absoluteExistingGifs := referenceframe.NewGeometriesInFrame(referenceframe.World, existingGeoms)
+
+	// get the current position of the base
+	currentPosition, err := mr.kinematicBase.CurrentPosition(ctx)
+	if err != nil {
+		return state.ExecuteResponse{}, err
 	}
 
 	for visSrvc, cameraNames := range mr.obstacleDetectors {
 		for _, camName := range cameraNames {
-			mr.logger.Debugf(
-				"proceeding to get detections from vision service: %s with camera: %s",
-				visSrvc.Name().ShortName(),
-				camName.ShortName(),
-			)
-
-			// get detections from vision service
-			detections, err := visSrvc.GetObjectPointClouds(ctx, camName.Name, nil)
-			if err != nil {
-				return state.ExecuteResponse{}, err
-			}
-
 			// Note: detections are initially observed from the camera frame but must be transformed to be in
-			// world frame. We cannot use the inputs of the base to transform the detections since they are relative
+			// world frame. We cannot use the inputs of the base to transform the detections since they are relative.
+			gifs, err := mr.getTransientDetections(ctx, visSrvc, camName, currentPosition.Pose())
+			if err != nil {
+				return state.ExecuteResponse{}, err
+			}
+			if len(gifs.Geometries()) == 0 {
+				mr.logger.CDebug(ctx, "will not check if obstacles intersect path since nothing was detected")
+				return state.ExecuteResponse{}, nil
+			}
 
-			// get the current position of the base which we will use to transform the detection into world coordinates
-			currentPosition, err := mr.kinematicBase.CurrentPosition(ctx)
+			// construct new worldstate
+			worldState, err := referenceframe.NewWorldState([]*referenceframe.GeometriesInFrame{absoluteExistingGifs, gifs}, nil)
 			if err != nil {
 				return state.ExecuteResponse{}, err
 			}
 
-			// determine transform of camera to base
-			cameraOrigin := referenceframe.NewPoseInFrame(camName.ShortName(), spatialmath.NewZeroPose())
-			baseToCamera, err := mr.fsService.TransformPose(ctx, cameraOrigin, mr.kinematicBase.Name().ShortName(), nil)
-			if err != nil {
-				// here we make the assumption the base is coincident with the camera
-				mr.logger.Debugf(
-					"we assume the base named: %s is coincident with the camera named: %s due to err: %v",
-					mr.kinematicBase.Name().ShortName(), camName.ShortName(), err.Error(),
-				)
-				baseToCamera = cameraOrigin
-			}
-
-			// Any obstacles specified by the worldstate of the moveRequest will also re-detected here.
-			// There is no need to append the new detections to the existing worldstate.
-			// We can safely build from scratch without excluding any valuable information.
-			geoms := []spatialmath.Geometry{}
-			for i, detection := range detections {
-				// put the detection in the base coordinate frame
-				geometry := detection.Geometry.Transform(baseToCamera.Pose())
-
-				// put the detection into its position in the world with the base coordinate frame
-				geometry = geometry.Transform(currentPosition.Pose())
-				label := camName.Name + "_transientObstacle_" + strconv.Itoa(i)
-				if geometry.Label() != "" {
-					label += "_" + geometry.Label()
-				}
-				geometry.SetLabel(label)
-				geoms = append(geoms, geometry)
-			}
-			gif := referenceframe.NewGeometriesInFrame(referenceframe.World, geoms)
-			// want to have all geometry's be in the world coordinate frame
-			tf, err := mr.planRequest.FrameSystem.Transform(mr.planRequest.StartConfiguration, gif, mr.planRequest.FrameSystem.World().Name())
-			if err != nil {
-				return state.ExecuteResponse{}, err
-			}
-			transformedGIF, ok := tf.((*referenceframe.GeometriesInFrame))
-			if !ok {
-				return state.ExecuteResponse{}, errors.New("cannot cast transformable as *referenceframe.GeometriesInFrame")
-			}
-			gifs := []*referenceframe.GeometriesInFrame{transformedGIF}
-			worldState, err := referenceframe.NewWorldState(gifs, nil)
-			if err != nil {
-				return state.ExecuteResponse{}, err
-			}
-
+			// build representation of frame system's inputs
 			currentInputs, err := mr.kinematicBase.CurrentInputs(ctx)
 			if err != nil {
 				return state.ExecuteResponse{}, err
 			}
+			inputMap := referenceframe.StartPositions(mr.planRequest.FrameSystem)
+			inputMap[mr.kinematicBase.Name().ShortName()] = currentInputs
 
 			// get the pose difference between where the robot is versus where it ought to be.
-			errorState, err := mr.kinematicBase.ErrorState(ctx, waypoints, waypointIndex)
+			errorState, err := mr.kinematicBase.ErrorState(ctx, plan, waypointIndex)
 			if err != nil {
 				return state.ExecuteResponse{}, err
 			}
 
+			mr.logger.CDebugf(ctx, "CheckPlan inputs: \n currentPosition: %v\n currentInputs: %v\n errorState: %v\n worldstate: %s",
+				spatialmath.PoseToProtobuf(currentPosition.Pose()),
+				currentInputs,
+				spatialmath.PoseToProtobuf(errorState),
+				worldState.String(),
+			)
+
 			if err := motionplan.CheckPlan(
 				mr.kinematicBase.Kinematics(), // frame we wish to check for collisions
-				plan,                          // remainder of plan we wish to check against
-				worldState,                    // detected obstacles by this instance of camera + service
+				remainingPlan,
+				worldState, // detected obstacles by this instance of camera + service
 				mr.planRequest.FrameSystem,
 				currentPosition.Pose(), // currentPosition of robot accounts for errorState
-				currentInputs,
+				inputMap,
 				errorState, // deviation of robot from plan
 				lookAheadDistanceMM,
 				mr.planRequest.Logger,
@@ -526,14 +566,14 @@ func (ms *builtIn) newMoveOnGlobeRequest(
 		fs,
 		geomsRaw,
 		valExtra,
-		requestTypeMoveOnGlobe,
 	)
 	if err != nil {
 		return nil, err
 	}
 	mr.seedPlan = seedPlan
 	mr.replanCostFactor = valExtra.replanCostFactor
-	mr.geoPoseOrigin = *spatialmath.NewGeoPose(origin, heading)
+	mr.requestType = requestTypeMoveOnGlobe
+	mr.geoPoseOrigin = spatialmath.NewGeoPose(origin, heading)
 	return mr, nil
 }
 
@@ -626,11 +666,11 @@ func (ms *builtIn) newMoveOnMapRequest(
 		fs,
 		req.Obstacles,
 		valExtra,
-		requestTypeMoveOnMap,
 	)
 	if err != nil {
 		return nil, err
 	}
+	mr.requestType = requestTypeMoveOnMap
 	return mr, nil
 }
 
@@ -643,7 +683,6 @@ func (ms *builtIn) relativeMoveRequestFromAbsolute(
 	fs referenceframe.FrameSystem,
 	worldObstacles []spatialmath.Geometry,
 	valExtra validatedExtra,
-	reqType requestType,
 ) (*moveRequest, error) {
 	// replace original base frame with one that knows how to move itself and allow planning for
 	kinematicFrame := kb.Kinematics()
@@ -750,6 +789,7 @@ func (ms *builtIn) relativeMoveRequestFromAbsolute(
 			WorldState:         worldState,
 			Options:            valExtra.extra,
 		},
+		poseOrigin:        startPose,
 		kinematicBase:     kb,
 		replanCostFactor:  valExtra.replanCostFactor,
 		obstacleDetectors: obstacleDetectors,
@@ -760,10 +800,6 @@ func (ms *builtIn) relativeMoveRequestFromAbsolute(
 		responseChan: make(chan moveResponse, 1),
 
 		waypointIndex: &waypointIndex,
-		requestType:   reqType,
-	}
-	if reqType == requestTypeMoveOnMap {
-		mr.poseOrigin = startPose
 	}
 
 	// TODO: Change deviatedFromPlan to just query positionPollingFreq on the struct & the same for the obstaclesIntersectPlan
@@ -781,24 +817,24 @@ func (mr moveResponse) String() string {
 	return fmt.Sprintf("builtin.moveResponse{executeResponse: %#v, err: %v}", mr.executeResponse, mr.err)
 }
 
-func (mr *moveRequest) start(ctx context.Context, waypoints [][]referenceframe.Input) {
+func (mr *moveRequest) start(ctx context.Context, plan motionplan.Plan) {
 	if ctx.Err() != nil {
 		return
 	}
 	mr.executeBackgroundWorkers.Add(1)
 	goutils.ManagedGo(func() {
-		mr.position.startPolling(ctx, waypoints, mr.waypointIndex)
+		mr.position.startPolling(ctx, plan, mr.waypointIndex)
 	}, mr.executeBackgroundWorkers.Done)
 
 	mr.executeBackgroundWorkers.Add(1)
 	goutils.ManagedGo(func() {
-		mr.obstacle.startPolling(ctx, waypoints, mr.waypointIndex)
+		mr.obstacle.startPolling(ctx, plan, mr.waypointIndex)
 	}, mr.executeBackgroundWorkers.Done)
 
 	// spawn function to execute the plan on the robot
 	mr.executeBackgroundWorkers.Add(1)
 	goutils.ManagedGo(func() {
-		executeResp, err := mr.execute(ctx, waypoints, mr.waypointIndex)
+		executeResp, err := mr.execute(ctx, plan, mr.waypointIndex)
 		resp := moveResponse{executeResponse: executeResp, err: err}
 		mr.responseChan <- resp
 	}, mr.executeBackgroundWorkers.Done)
@@ -824,15 +860,6 @@ func (mr *moveRequest) listen(ctx context.Context) (state.ExecuteResponse, error
 	}
 }
 
-func (mr *moveRequest) Execute(ctx context.Context, waypoints state.Waypoints) (state.ExecuteResponse, error) {
-	defer mr.executeBackgroundWorkers.Wait()
-	cancelCtx, cancelFn := context.WithCancel(ctx)
-	defer cancelFn()
-
-	mr.start(cancelCtx, waypoints)
-	return mr.listen(cancelCtx)
-}
-
 func (mr *moveRequest) stop() error {
 	stopCtx, cancelFn := context.WithTimeout(context.Background(), baseStopTimeout)
 	defer cancelFn()
@@ -841,32 +868,4 @@ func (mr *moveRequest) stop() error {
 		return stopErr
 	}
 	return nil
-}
-
-func toGeoPosePlanSteps(posesByComponent []motionplan.PlanStep, geoPoses []spatialmath.GeoPose) ([]motionplan.PlanStep, error) {
-	if len(geoPoses) != len(posesByComponent) {
-		msg := "GeoPoses (len: %d) & PosesByComponent (len: %d) must have the same length"
-		return nil, fmt.Errorf(msg, len(geoPoses), len(posesByComponent))
-	}
-	steps := make([]motionplan.PlanStep, 0, len(posesByComponent))
-	for i, ps := range posesByComponent {
-		if len(ps) == 0 {
-			continue
-		}
-
-		if l := len(ps); l > 1 {
-			return nil, fmt.Errorf("only single component or fewer plan steps supported, received plan step with %d componenents", l)
-		}
-
-		var resourceName resource.Name
-		for k := range ps {
-			resourceName = k
-		}
-		geoPose := geoPoses[i]
-		heading := math.Mod(math.Abs(geoPose.Heading()-360), 360)
-		o := &spatialmath.OrientationVectorDegrees{OZ: 1, Theta: heading}
-		poseContainingGeoPose := spatialmath.NewPose(r3.Vector{X: geoPose.Location().Lng(), Y: geoPose.Location().Lat()}, o)
-		steps = append(steps, map[resource.Name]spatialmath.Pose{resourceName: poseContainingGeoPose})
-	}
-	return steps, nil
 }

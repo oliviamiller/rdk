@@ -30,7 +30,7 @@ const (
 
 var (
 	// Model is the name of the sensor_controlled model of a base component.
-	Model           = resource.DefaultModelFamily.WithModel("sensor-controlled")
+	model           = resource.DefaultModelFamily.WithModel("sensor-controlled")
 	errNoGoodSensor = errors.New("no appropriate sensor for orientation or velocity feedback")
 )
 
@@ -91,7 +91,7 @@ type sensorBase struct {
 func init() {
 	resource.RegisterComponent(
 		base.API,
-		Model,
+		model,
 		resource.Registration[base.Base, *Config]{Constructor: createSensorBase})
 }
 
@@ -186,17 +186,21 @@ func (sb *sensorBase) Reconfigure(ctx context.Context, deps resource.Dependencie
 		// unlock the mutex before setting up the control loop so that the motors
 		// are not locked, and can run if any auto-tuning is necessary
 		sb.mu.Unlock()
+		switch {
 		// check if both linear and angular need to be tuned, and if so start by tuning linear
-		if !(linear.P == 0.0 && linear.I == 0.0 && linear.D == 0.0 &&
-			angular.P == 0.0 && angular.I == 0.0 && angular.D == 0.0) {
+		case (linear.P != 0.0 || linear.I != 0.0 || linear.D != 0.0) &&
+			(angular.P != 0.0 || angular.I != 0.0 || angular.D != 0.0):
 			sb.controlLoopConfig = sb.createControlLoopConfig(linear, angular)
-			if err := sb.setupControlLoops(); err != nil {
+		case linear.P == 0.0 && linear.I == 0.0 && linear.D == 0.0 &&
+			angular.P == 0.0 && angular.I == 0.0 && angular.D == 0.0:
+			cancelCtx, cancelFunc := context.WithCancel(context.Background())
+			if err := sb.autoTuneAll(cancelCtx, cancelFunc, linear, angular); err != nil {
 				sb.mu.Lock()
 				return err
 			}
-		} else {
-			cancelCtx, cancelFunc := context.WithCancel(context.Background())
-			if err := sb.autoTuneAll(cancelCtx, cancelFunc, linear, angular); err != nil {
+		default:
+			sb.controlLoopConfig = sb.createControlLoopConfig(linear, angular)
+			if err := sb.setupControlLoops(); err != nil {
 				sb.mu.Lock()
 				return err
 			}
