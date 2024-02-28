@@ -3,7 +3,6 @@ package incremental
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"os"
 	"sync"
@@ -248,13 +247,11 @@ func (e *Encoder) Start(ctx context.Context) {
 			case <-e.cancelCtx.Done():
 				return
 			case tick = <-chanA:
-				fmt.Println("CHAN A tick")
 				aLevel = 0
 				if tick.High {
 					aLevel = 1
 				}
 			case tick = <-chanB:
-				fmt.Println("CHAN B tick")
 				bLevel = 0
 				if tick.High {
 					bLevel = 1

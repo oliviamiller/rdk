@@ -217,8 +217,6 @@ func (s *serviceServer) StreamTicks(
 		return err
 	}
 
-	fmt.Println("in server stream ticks")
-
 	ticksChan := make(chan Tick, 1024)
 
 	err = b.StreamTicks(server.Context(), req.Interrupts, ticksChan, nil)
@@ -228,6 +226,7 @@ func (s *serviceServer) StreamTicks(
 	for {
 		select {
 		case <-server.Context().Done():
+			fmt.Println("server context done")
 			return server.Context().Err()
 		case msg := <-ticksChan:
 			err := server.Send(&pb.StreamTicksResponse{Name: msg.Name, Tick: &pb.Tick{High: msg.High, Time: msg.TimestampNanosec}})

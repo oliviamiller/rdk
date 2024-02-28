@@ -6,6 +6,7 @@ package genericlinux
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 
@@ -92,8 +93,6 @@ func (di *digitalInterrupt) startMonitor() {
 			case <-di.cancelCtx.Done():
 				return
 			case event := <-di.line.Events():
-				// line := fmt.Sprintf("%s : %d %d\n", di.config.Name, event.Time.UnixNano(), time.Now().UnixNano())
-				// di.f.WriteString(line)
 				utils.UncheckedError(di.interrupt.Tick(
 					di.cancelCtx, event.RisingEdge, uint64(event.Time.UnixNano())))
 			}
@@ -102,6 +101,7 @@ func (di *digitalInterrupt) startMonitor() {
 }
 
 func (di *digitalInterrupt) AddCallback(ctx context.Context, ch chan board.Tick, extra map[string]interface{}) error {
+	fmt.Println("ADDING CALLBACK ")
 	di.mu.Lock()
 	defer di.mu.Unlock()
 	di.callbacks = append(di.callbacks, ch)

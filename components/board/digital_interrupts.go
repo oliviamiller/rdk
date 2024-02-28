@@ -98,7 +98,6 @@ func (i *BasicDigitalInterrupt) Tick(ctx context.Context, high bool, nanoseconds
 	if high {
 		atomic.AddInt64(&i.count, 1)
 	}
-
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	for _, c := range i.callbacks {

@@ -492,9 +492,8 @@ func (b *Board) WriteAnalog(ctx context.Context, pin string, value int32, extra 
 	return nil
 }
 
-// AddCallback adds a callback to be sent a low/high value to when a tick
-// happens.
 func (b *Board) StreamTicks(ctx context.Context, interrupts []string, ch chan board.Tick, extra map[string]interface{}) error {
+	fmt.Println("DRIVER STREAM TICKS")
 	for _, name := range interrupts {
 		interrupt, ok := b.DigitalInterruptByName(name)
 		if !ok {
