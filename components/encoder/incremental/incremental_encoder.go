@@ -31,8 +31,9 @@ func init() {
 // Encoder keeps track of a motor position using a rotary incremental encoder.
 type Encoder struct {
 	resource.Named
-	mu   sync.Mutex
-	A, B board.DigitalInterrupt
+	mu         sync.Mutex
+	A, B       board.DigitalInterrupt
+	interrupts []string
 	// The position is pRaw with the least significant bit chopped off.
 	position int64
 	// pRaw is the number of half-ticks we've gone through: it increments or decrements whenever
@@ -45,6 +46,7 @@ type Encoder struct {
 	boardName string
 	encAName  string
 	encBName  string
+	board     board.Board
 
 	logger logging.Logger
 
@@ -158,10 +160,11 @@ func (e *Encoder) Reconfigure(
 	e.mu.Lock()
 	e.A = encA
 	e.B = encB
-	e.f, _ = os.Create("/tmp/encoderbuilt.txt")
 	e.boardName = newConf.BoardName
+	e.board = board
 	e.encAName = newConf.Pins.A
 	e.encBName = newConf.Pins.B
+	e.interrupts = []string{e.encAName, e.encBName}
 	// state is not really valid anymore
 	atomic.StoreInt64(&e.position, 0)
 	atomic.StoreInt64(&e.pRaw, 0)
@@ -211,10 +214,12 @@ func (e *Encoder) Start(ctx context.Context) {
 	// x -> impossible state
 
 	chanA := make(chan board.Tick)
-	chanB := make(chan board.Tick)
 
-	e.A.AddCallback(ctx, chanA, nil)
-	e.B.AddCallback(ctx, chanB, nil)
+	e.board.StreamTicks(context.Background(), e.interrupts, chanA, nil)
+	// time.Sleep(10 * time.Second)
+	// e.board.RemoveTickStream()
+
+	// time.Sleep(40 * time.Second)
 
 	aLevel, err := e.A.Value(ctx, nil)
 	if err != nil {
@@ -227,8 +232,8 @@ func (e *Encoder) Start(ctx context.Context) {
 	e.pState = aLevel | (bLevel << 1)
 
 	e.activeBackgroundWorkers.Add(1)
-
 	utils.ManagedGo(func() {
+		//defer (chanA)
 		for {
 			// This looks redundant with the other select statement below, but it's not: if we're
 			// supposed to return, we need to do that even if chanA and chanB are full of data, and
@@ -247,14 +252,17 @@ func (e *Encoder) Start(ctx context.Context) {
 			case <-e.cancelCtx.Done():
 				return
 			case tick = <-chanA:
-				aLevel = 0
-				if tick.High {
-					aLevel = 1
+				if tick.Name == e.encAName {
+					aLevel = 0
+					if tick.High {
+						aLevel = 1
+					}
 				}
-			case tick = <-chanB:
-				bLevel = 0
-				if tick.High {
-					bLevel = 1
+				if tick.Name == e.encBName {
+					bLevel = 0
+					if tick.High {
+						bLevel = 1
+					}
 				}
 			}
 			nState := aLevel | (bLevel << 1)
@@ -322,7 +330,7 @@ func (e *Encoder) RawPosition() int64 {
 
 // Close shuts down the Encoder.
 func (e *Encoder) Close(ctx context.Context) error {
-	e.logger.Info("CLOSING ENCODER")
+	e.logger.Info("closing encoder")
 	e.cancelFunc()
 	e.logger.Info("cancelled context")
 	e.activeBackgroundWorkers.Wait()

@@ -76,6 +76,7 @@ type BasicDigitalInterrupt struct {
 
 // Value returns the amount of ticks that have occurred.
 func (i *BasicDigitalInterrupt) Value(ctx context.Context, extra map[string]interface{}) (int64, error) {
+	fmt.Println("in value")
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	count := atomic.LoadInt64(&i.count)

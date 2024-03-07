@@ -261,7 +261,6 @@ func (dic *digitalInterruptClient) Value(ctx context.Context, extra map[string]i
 }
 
 func (dic *digitalInterruptClient) Tick(ctx context.Context, high bool, nanoseconds uint64) error {
-	fmt.Println("here tick client")
 	tick := Tick{Name: dic.digitalInterruptName, High: high, TimestampNanosec: nanoseconds}
 	for _, ch := range dic.callbacks {
 		ch <- tick

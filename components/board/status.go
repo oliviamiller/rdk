@@ -14,6 +14,8 @@ import (
 func CreateStatus(ctx context.Context, b Board, extra map[string]interface{}) (*commonpb.BoardStatus, error) {
 	var status commonpb.BoardStatus
 
+	fmt.Println("CREATING STATUS")
+
 	if names := b.AnalogReaderNames(); len(names) != 0 {
 		status.Analogs = make(map[string]*commonpb.AnalogStatus, len(names))
 		for _, name := range names {
@@ -40,6 +42,8 @@ func CreateStatus(ctx context.Context, b Board, extra map[string]interface{}) (*
 			if err != nil {
 				return nil, err
 			}
+			fmt.Println("VALIE")
+			fmt.Println(intVal)
 			status.DigitalInterrupts[name] = &commonpb.DigitalInterruptStatus{Value: intVal}
 		}
 	}

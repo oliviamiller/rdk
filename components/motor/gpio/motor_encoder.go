@@ -367,7 +367,7 @@ func (m *EncodedMotor) SetPower(ctx context.Context, powerPct float64, extra map
 // setPower assumes the state lock is held.
 func (m *EncodedMotor) setPower(ctx context.Context, powerPct float64, internal bool) error {
 	dir := sign(powerPct)
-	if math.Abs(powerPct) < 0.1 && m.loop == nil {
+	if math.Abs(powerPct) < 0.1 && len(m.controlLoopConfig.Blocks) == 0 {
 		m.state.lastPowerPct = 0.1 * dir
 	} else {
 		m.state.lastPowerPct = powerPct
@@ -387,7 +387,6 @@ func (m *EncodedMotor) setPower(ctx context.Context, powerPct float64, internal 
 // If revolutions is 0, this will run the motor at rpm indefinitely
 // If revolutions != 0, this will block until the number of revolutions has been completed or another operation comes in.
 func (m *EncodedMotor) GoFor(ctx context.Context, rpm, revolutions float64, extra map[string]interface{}) error {
-	m.logger.Info("GO FOR")
 	ctx, done := m.opMgr.New(ctx)
 	defer done()
 	if err := m.goForInternal(ctx, rpm, revolutions); err != nil {
@@ -609,6 +608,8 @@ func (m *EncodedMotor) Stop(ctx context.Context, extra map[string]interface{}) e
 	m.state.goalRPM = 0
 	m.state.regulated = false
 	m.stateMu.Unlock()
+
+	fmt.Println("stopping motor")
 
 	// after the motor is created, Stop is called, but if the PID controller
 	// is auto-tuning, the loop needs to keep running
