@@ -115,11 +115,9 @@ func (i *BasicDigitalInterrupt) Tick(ctx context.Context, high bool, nanoseconds
 }
 
 // AddCallback adds a listener for interrupts.
-func (i *BasicDigitalInterrupt) AddCallback(ctx context.Context, c chan board.Tick, extra map[string]interface{}) error {
+func (i *BasicDigitalInterrupt) AddCallback(c chan board.Tick) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	i.callbacks = append(i.callbacks, c)
-	return nil
 }
 
 // RemoveCallback removes a listener for interrupts.
@@ -192,7 +190,7 @@ func (i *ServoDigitalInterrupt) Tick(ctx context.Context, high bool, now uint64)
 }
 
 // AddCallback currently panics.
-func (i *ServoDigitalInterrupt) AddCallback(ctx context.Context, c chan board.Tick, extra map[string]interface{}) error {
+func (i *ServoDigitalInterrupt) AddCallback(c chan board.Tick) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	panic("servos can't have callback")

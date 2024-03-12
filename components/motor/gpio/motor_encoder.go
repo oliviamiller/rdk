@@ -609,8 +609,6 @@ func (m *EncodedMotor) Stop(ctx context.Context, extra map[string]interface{}) e
 	m.state.regulated = false
 	m.stateMu.Unlock()
 
-	fmt.Println("stopping motor")
-
 	// after the motor is created, Stop is called, but if the PID controller
 	// is auto-tuning, the loop needs to keep running
 	if m.loop != nil && !m.loop.GetTuning(ctx) {

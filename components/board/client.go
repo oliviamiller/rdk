@@ -3,7 +3,6 @@ package board
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -268,9 +267,22 @@ func (dic *digitalInterruptClient) Tick(ctx context.Context, high bool, nanoseco
 	return nil
 }
 
-func (dic *digitalInterruptClient) AddCallback(ctx context.Context, ch chan Tick, extra map[string]interface{}) error {
+func (dic *digitalInterruptClient) AddCallback(ch chan Tick) {
 	dic.callbacks = append(dic.callbacks, ch)
-	return nil
+}
+
+func (dic *digitalInterruptClient) RemoveCallback(ch chan Tick) {
+	dic.mu.Lock()
+	defer dic.mu.Unlock()
+	for id := range dic.callbacks {
+		if dic.callbacks[id] == ch {
+			// To remove this item, we replace it with the last item in the list, then truncate the
+			// list by 1.
+			dic.callbacks[id] = dic.callbacks[len(dic.callbacks)-1]
+			dic.callbacks = dic.callbacks[:len(dic.callbacks)-1]
+			break
+		}
+	}
 }
 
 func (c *client) StreamTicks(ctx context.Context, interrupts []string, ch chan Tick, extra map[string]interface{}) error {
@@ -298,17 +310,14 @@ func (c *client) StreamTicks(ctx context.Context, interrupts []string, ch chan T
 
 	// wait until the stream is ready to return
 	for !ready {
-		fmt.Println("here - stream not ready yet")
 		c.mu.RLock()
 		ready = c.streamReady
 		c.mu.RUnlock()
 		// wait for 50 ms before checking again
 		if !utils.SelectContextOrWait(ctx, 50*time.Millisecond) {
-			fmt.Println("context here")
 			return ctx.Err()
 		}
 	}
-	fmt.Println("returning nil - stream ready")
 	return nil
 
 }
@@ -333,14 +342,13 @@ func (c *client) connectTickStream(ctx context.Context, interrupts []string, ch 
 		c.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			fmt.Println("ctx done")
 			return
 		default:
 		}
 
 		req := &pb.StreamTicksRequest{
-			Name:       c.info.name,
-			Interrupts: interrupts,
+			Name:     c.info.name,
+			PinNames: interrupts,
 		}
 
 		//call the server to start streaming ticks
@@ -368,19 +376,19 @@ func (c *client) connectTickStream(ctx context.Context, interrupts []string, ch 
 			c.mu.Unlock()
 			streamResp, err := stream.Recv()
 			if err != nil && streamResp == nil {
-				c.logger.Error(err)
+				// only debug log the context canceled error
+				c.logger.Debug(err)
 				c.streamCancel()
 				return
 			}
 			if err != nil {
-				fmt.Println("err not nil and resp not nil")
 				c.logger.CError(ctx, err)
 			} else {
 				// If there is a response with a tick, send it to the channel
 				tick := Tick{
-					Name:             streamResp.Name,
-					High:             streamResp.Tick.High,
-					TimestampNanosec: streamResp.Tick.Time,
+					Name:             streamResp.PinName,
+					High:             streamResp.High,
+					TimestampNanosec: streamResp.Time,
 				}
 				ch <- tick
 			}

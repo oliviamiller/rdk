@@ -6,7 +6,6 @@ package genericlinux
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sync"
 
@@ -100,12 +99,10 @@ func (di *digitalInterrupt) startMonitor() {
 	}, di.boardWorkers.Done)
 }
 
-func (di *digitalInterrupt) AddCallback(ctx context.Context, ch chan board.Tick, extra map[string]interface{}) error {
-	fmt.Println("ADDING CALLBACK ")
+func (di *digitalInterrupt) AddCallback(c chan board.Tick) {
 	di.mu.Lock()
 	defer di.mu.Unlock()
-	di.callbacks = append(di.callbacks, ch)
-	return nil
+	di.callbacks = append(di.callbacks, c)
 }
 
 func (di *digitalInterrupt) Close() error {

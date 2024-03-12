@@ -184,11 +184,9 @@ func (e *Encoder) Reconfigure(
 // Start starts the Encoder background thread.
 func (e *Encoder) Start(ctx context.Context) {
 	encoderChannel := make(chan board.Tick)
-	// e.I.AddCallback(ctx, encoderChannel, nil)
 	e.board.StreamTicks(context.Background(), []string{e.diPinName}, encoderChannel, nil)
 	e.activeBackgroundWorkers.Add(1)
 	utils.ManagedGo(func() {
-		// defer e.I.RemoveCallback(encoderChannel)
 		for {
 			select {
 			case <-e.cancelCtx.Done():

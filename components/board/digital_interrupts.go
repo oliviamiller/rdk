@@ -2,7 +2,6 @@ package board
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -40,7 +39,10 @@ type DigitalInterrupt interface {
 
 	// AddCallback adds a callback to be sent a low/high value to when a tick
 	// happens.
-	AddCallback(ctx context.Context, ch chan Tick, extra map[string]interface{}) error
+	AddCallback(ch chan Tick)
+
+	// RemoveCallback removes a callback.
+	RemoveCallback(ch chan Tick)
 
 	Close(ctx context.Context) error
 }
@@ -76,7 +78,6 @@ type BasicDigitalInterrupt struct {
 
 // Value returns the amount of ticks that have occurred.
 func (i *BasicDigitalInterrupt) Value(ctx context.Context, extra map[string]interface{}) (int64, error) {
-	fmt.Println("in value")
 	i.mu.RLock()
 	defer i.mu.RUnlock()
 	count := atomic.LoadInt64(&i.count)
@@ -112,18 +113,14 @@ func (i *BasicDigitalInterrupt) Tick(ctx context.Context, high bool, nanoseconds
 }
 
 // AddCallback adds a listener for interrupts.
-func (i *BasicDigitalInterrupt) AddCallback(ctx context.Context, ch chan Tick, extra map[string]interface{}) error {
+func (i *BasicDigitalInterrupt) AddCallback(c chan Tick) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	fmt.Println("HERE ADD CALLBACK DRIVER")
-	i.callbacks = append(i.callbacks, ch)
-	return nil
+	i.callbacks = append(i.callbacks, c)
 }
 
 // RemoveCallback removes a listener for interrupts.
 func (i *BasicDigitalInterrupt) RemoveCallback(c chan Tick) {
-
-	fmt.Println("REMOVING CALLBACK DRIVER")
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	for id := range i.callbacks {

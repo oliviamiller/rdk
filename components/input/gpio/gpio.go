@@ -260,7 +260,7 @@ func (c *Controller) newButton(ctx context.Context, brd board.Board, intName str
 		return fmt.Errorf("can't find DigitalInterrupt (%s)", intName)
 	}
 	tickChan := make(chan board.Tick)
-	interrupt.AddCallback(ctx, tickChan, nil)
+	interrupt.AddCallback(tickChan)
 
 	c.activeBackgroundWorkers.Add(1)
 	utils.ManagedGo(func() {

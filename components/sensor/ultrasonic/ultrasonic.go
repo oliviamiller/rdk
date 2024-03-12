@@ -106,9 +106,7 @@ func NewSensor(ctx context.Context, deps resource.Dependencies,
 		return nil, errors.Wrap(err, "ultrasonic: cannot set trigger pin to low")
 	}
 
-	s.f, _ = os.Create("/tmp/ultrasonicbuiltin.txt")
-
-	s.board.StreamTicks(cancelCtx, []string{s.config.EchoInterrupt}, s.ticksChan, nil)
+	//s.board.StreamTicks(cancelCtx, []string{s.config.EchoInterrupt}, s.ticksChan, nil)
 
 	return s, nil
 }
@@ -141,16 +139,16 @@ func (s *Sensor) Readings(ctx context.Context, extra map[string]interface{}) (ma
 
 	// Grab the 2 pins from the board. We don't just get these once during setup, in case the board
 	// reconfigures itself because someone decided to rewire things.
-	// echoInterrupt, ok := s.board.DigitalInterruptByName(s.config.EchoInterrupt)
-	// if !ok {
-	// 	return nil, errors.Errorf("ultrasonic: cannot grab digital interrupt %q", s.config.EchoInterrupt)
-	// }
+	_, ok := s.board.DigitalInterruptByName(s.config.EchoInterrupt)
+	if !ok {
+		return nil, errors.Errorf("ultrasonic: cannot grab digital interrupt %q", s.config.EchoInterrupt)
+	}
 	triggerPin, err := s.board.GPIOPinByName(s.config.TriggerPin)
 	if err != nil {
 		return nil, errors.Wrapf(err, "ultrasonic: cannot grab gpio %q", s.config.TriggerPin)
 	}
-	// echoInterrupt.AddCallback(ctx, s.ticksChan, nil)
-	// defer echoInterrupt.RemoveCallback(s.ticksChan)
+
+	s.board.StreamTicks(ctx, []string{s.config.EchoInterrupt}, s.ticksChan, nil)
 
 	// we send a high and a low to the trigger pin 10 microseconds
 	// apart to signal the sensor to begin sending the sonic pulse
@@ -195,7 +193,6 @@ func (s *Sensor) Readings(ctx context.Context, extra map[string]interface{}) (ma
 
 // Close remove interrupt callback of ultrasonic sensor.
 func (s *Sensor) Close(ctx context.Context) error {
-	fmt.Println("closing ultrasonic sensor builtin")
 	s.cancelFunc()
 	return nil
 }

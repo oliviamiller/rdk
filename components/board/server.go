@@ -3,7 +3,6 @@ package board
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/pkg/errors"
 	commonpb "go.viam.com/api/common/v1"
@@ -219,17 +218,16 @@ func (s *serviceServer) StreamTicks(
 
 	ticksChan := make(chan Tick, 1024)
 
-	err = b.StreamTicks(server.Context(), req.Interrupts, ticksChan, nil)
+	err = b.StreamTicks(server.Context(), req.PinNames, ticksChan, nil)
 	if err != nil {
 		return err
 	}
 	for {
 		select {
 		case <-server.Context().Done():
-			fmt.Println("server context done")
 			return server.Context().Err()
 		case msg := <-ticksChan:
-			err := server.Send(&pb.StreamTicksResponse{Name: msg.Name, Tick: &pb.Tick{High: msg.High, Time: msg.TimestampNanosec}})
+			err := server.Send(&pb.StreamTicksResponse{PinName: msg.Name, High: msg.High, Time: msg.TimestampNanosec})
 			if err != nil {
 				return err
 			}

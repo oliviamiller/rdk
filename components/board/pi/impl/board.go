@@ -208,7 +208,7 @@ func (pi *piPigpio) StreamTicks(ctx context.Context, interrupts []string, ch cha
 		if !ok {
 			return errors.Errorf("unknown digital interrupt: %s", name)
 		}
-		interrupt.AddCallback(context.Background(), ch, nil)
+		interrupt.AddCallback(ch)
 	}
 	return nil
 }

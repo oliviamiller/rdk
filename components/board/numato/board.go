@@ -233,10 +233,6 @@ func (b *numatoBoard) StreamTicks(ctx context.Context, interrupts []string, ch c
 	return grpc.UnimplementedError
 }
 
-func (b *numatoBoard) RemoveTickStream() error {
-	return nil
-}
-
 // AnalogReaderByName returns an analog reader by name.
 func (b *numatoBoard) AnalogReaderByName(name string) (board.AnalogReader, bool) {
 	ar, ok := b.analogs[name]

@@ -344,7 +344,7 @@ func makeAdxl345(
 
 	for _, interrupt := range interruptMap {
 		ticksChan := make(chan board.Tick)
-		interrupt.AddCallback(context.Background(), ticksChan, nil)
+		interrupt.AddCallback(ticksChan)
 		sensor.interruptChannels[interrupt] = ticksChan
 		sensor.startInterruptMonitoring(ticksChan)
 	}
