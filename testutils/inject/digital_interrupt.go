@@ -13,7 +13,7 @@ type DigitalInterrupt struct {
 	valueCap        []interface{}
 	TickFunc        func(ctx context.Context, high bool, nanoseconds uint64) error
 	tickCap         []interface{}
-	AddCallbackFunc func(chan board.Tick) error
+	AddCallbackFunc func(c chan board.Tick)
 }
 
 // Value calls the injected Value or the real version.
@@ -56,6 +56,7 @@ func (d *DigitalInterrupt) TickCap() []interface{} {
 func (d *DigitalInterrupt) AddCallback(c chan board.Tick) {
 	if d.AddCallbackFunc == nil {
 		d.DigitalInterrupt.AddCallback(c)
+		return
 	}
 	d.AddCallbackFunc(c)
 }

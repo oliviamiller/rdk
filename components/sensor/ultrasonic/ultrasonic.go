@@ -3,9 +3,7 @@ package ultrasonic
 
 import (
 	"context"
-	"fmt"
 	"math"
-	"os"
 	"sync"
 	"time"
 
@@ -123,7 +121,6 @@ type Sensor struct {
 	cancelCtx  context.Context
 	cancelFunc func()
 	logger     logging.Logger
-	f          *os.File
 }
 
 func (s *Sensor) namedError(err error) error {
@@ -172,8 +169,6 @@ func (s *Sensor) Readings(ctx context.Context, extra map[string]interface{}) (ma
 		}
 		select {
 		case tick = <-s.ticksChan:
-			msg := fmt.Sprintf("%d at %d\n", tick.TimestampNanosec, time.Now().UnixNano())
-			s.f.WriteString(msg)
 			ticks[i] = tick
 		case <-s.cancelCtx.Done():
 			return nil, s.namedError(errors.New("ultrasonic: context canceled"))
