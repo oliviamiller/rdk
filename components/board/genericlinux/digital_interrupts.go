@@ -6,7 +6,6 @@ package genericlinux
 
 import (
 	"context"
-	"os"
 	"sync"
 
 	"github.com/mkch/gpio"
@@ -24,7 +23,6 @@ type digitalInterrupt struct {
 	cancelCtx    context.Context
 	cancelFunc   func()
 	config       *board.DigitalInterruptConfig
-	f            *os.File
 	callbacks    []chan board.Tick
 	mu           *sync.Mutex
 }
@@ -78,7 +76,6 @@ func (b *Board) createDigitalInterrupt(
 		config:       &config,
 	}
 
-	result.f, _ = os.Create("/tmp/linuxbuiltin.txt")
 	result.startMonitor()
 	return &result, nil
 }
@@ -97,12 +94,6 @@ func (di *digitalInterrupt) startMonitor() {
 			}
 		}
 	}, di.boardWorkers.Done)
-}
-
-func (di *digitalInterrupt) AddCallback(c chan board.Tick) {
-	di.mu.Lock()
-	defer di.mu.Unlock()
-	di.callbacks = append(di.callbacks, c)
 }
 
 func (di *digitalInterrupt) Close() error {
