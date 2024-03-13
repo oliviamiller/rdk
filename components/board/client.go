@@ -260,29 +260,15 @@ func (dic *digitalInterruptClient) Value(ctx context.Context, extra map[string]i
 }
 
 func (dic *digitalInterruptClient) Tick(ctx context.Context, high bool, nanoseconds uint64) error {
-	tick := Tick{Name: dic.digitalInterruptName, High: high, TimestampNanosec: nanoseconds}
-	for _, ch := range dic.callbacks {
-		ch <- tick
-	}
-	return nil
+	panic(errUnimplemented)
 }
 
 func (dic *digitalInterruptClient) AddCallback(ch chan Tick) {
-	dic.callbacks = append(dic.callbacks, ch)
+	panic(errUnimplemented)
 }
 
 func (dic *digitalInterruptClient) RemoveCallback(ch chan Tick) {
-	dic.mu.Lock()
-	defer dic.mu.Unlock()
-	for id := range dic.callbacks {
-		if dic.callbacks[id] == ch {
-			// To remove this item, we replace it with the last item in the list, then truncate the
-			// list by 1.
-			dic.callbacks[id] = dic.callbacks[len(dic.callbacks)-1]
-			dic.callbacks = dic.callbacks[:len(dic.callbacks)-1]
-			break
-		}
-	}
+	panic(errUnimplemented)
 }
 
 func (c *client) StreamTicks(ctx context.Context, interrupts []string, ch chan Tick, extra map[string]interface{}) error {
