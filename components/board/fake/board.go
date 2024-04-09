@@ -228,19 +228,7 @@ func (b *Board) WriteAnalog(ctx context.Context, pin string, value int32, extra 
 
 // StreamTicks starts a stream of digital interrupt ticks.
 func (b *Board) StreamTicks(ctx context.Context, interruptNames []string, ch chan board.Tick, extra map[string]interface{}) error {
-	var interrupts []board.DigitalInterrupt
-	for _, name := range interruptNames {
-		interrupt, ok := b.DigitalInterruptByName(name)
-		if !ok {
-			return errors.Errorf("unknown digital interrupt: %s", name)
-		}
-		interrupts = append(interrupts, interrupt)
-	}
-
-	for _, i := range interrupts {
-		i.AddCallback(ch)
-	}
-	return nil
+	return board.AddCallbacks(b, interruptNames, ch)
 }
 
 // Close attempts to cleanly close each part of the board.
@@ -394,7 +382,7 @@ func (s *DigitalInterruptWrapper) reset(conf board.DigitalInterruptConfig) error
 		s.conf = conf
 		s.di = di
 		for c := range s.callbacks {
-			s.di.AddCallback(c)
+			board.AddCallback(s.di, c)
 		}
 		return nil
 	}
@@ -422,23 +410,6 @@ func (s *DigitalInterruptWrapper) Tick(ctx context.Context, high bool, nanosecon
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.di.Tick(ctx, high, nanoseconds)
-}
-
-// AddCallback adds a callback to be sent a low/high value to when a tick
-// happens.
-func (s *DigitalInterruptWrapper) AddCallback(c chan board.Tick) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.callbacks[c] = struct{}{}
-	s.di.AddCallback(c)
-}
-
-// RemoveCallback removes a listener for interrupts.
-func (s *DigitalInterruptWrapper) RemoveCallback(c chan board.Tick) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.callbacks, c)
-	s.di.RemoveCallback(c)
 }
 
 // Close does nothing.

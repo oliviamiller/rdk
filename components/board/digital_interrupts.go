@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -37,15 +38,47 @@ type DigitalInterrupt interface {
 	// to be accurate.
 	Tick(ctx context.Context, high bool, nanoseconds uint64) error
 
-	// AddCallback adds a callback to be sent a low/high value to when a tick
-	// happens.
-	AddCallback(c chan Tick)
-
-	// RemoveCallback removes a listener for interrupts.
-	RemoveCallback(c chan Tick)
-
 	Close(ctx context.Context) error
 }
+
+// AddCallback adds a callback to be sent a low/high value to when a tick
+// happens.
+func AddCallback(i DigitalInterrupt, c chan Tick) {
+	di := i.(*BasicDigitalInterrupt)
+	di.mu.Lock()
+	defer di.mu.Unlock()
+	di.callbacks = append(di.callbacks, c)
+}
+
+// RemoveCallback removes a listener for interrupts.
+func RemoveCallback(di DigitalInterrupt, c chan Tick) error {
+	fmt.Println("IN REMOVE CALLBACK HEre")
+	_, ok := di.(*BasicDigitalInterrupt)
+	if !ok {
+		print("not basic")
+		di, ok = di.(*digitalInterruptClient)
+	}
+	return nil
+
+}
+
+// func RemoveCallbackGeneric[I DigitalInterrupt](di I, c chan Tick) {
+// 	part, ok := di.(I)
+
+// 	di.mu.Lock()
+// 	defer i.mu.Unlock()
+// 	di.callbacks = append(di.callbacks, c)
+
+// 	for id := range di.callbacks {
+// 		if di.callbacks[id] == c {
+// 			// To remove this item, we replace it with the last item in the list, then truncate the
+// 			// list by 1.
+// 			di.callbacks[id] = di.callbacks[len(di.callbacks)-1]
+// 			di.callbacks = di.callbacks[:len(di.callbacks)-1]
+// 			break
+// 		}
+// 	}
+// }
 
 // A ReconfigurableDigitalInterrupt is a simple reconfigurable digital interrupt that expects
 // reconfiguration within the same type.
@@ -72,7 +105,7 @@ type BasicDigitalInterrupt struct {
 
 	callbacks []chan Tick
 
-	mu  sync.RWMutex
+	mu  *sync.RWMutex
 	cfg DigitalInterruptConfig
 }
 
@@ -110,28 +143,6 @@ func (i *BasicDigitalInterrupt) Tick(ctx context.Context, high bool, nanoseconds
 		}
 	}
 	return nil
-}
-
-// AddCallback adds a listener for interrupts.
-func (i *BasicDigitalInterrupt) AddCallback(c chan Tick) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	i.callbacks = append(i.callbacks, c)
-}
-
-// RemoveCallback removes a listener for interrupts.
-func (i *BasicDigitalInterrupt) RemoveCallback(c chan Tick) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	for id := range i.callbacks {
-		if i.callbacks[id] == c {
-			// To remove this item, we replace it with the last item in the list, then truncate the
-			// list by 1.
-			i.callbacks[id] = i.callbacks[len(i.callbacks)-1]
-			i.callbacks = i.callbacks[:len(i.callbacks)-1]
-			break
-		}
-	}
 }
 
 // Close does nothing.

@@ -108,6 +108,17 @@ func NamesFromRobot(r robot.Robot) []string {
 	return robot.NamesByAPI(r, API)
 }
 
+func AddCallbacks(b Board, interrupts []string, ch chan Tick) error {
+	for _, name := range interrupts {
+		i, ok := b.DigitalInterruptByName(name)
+		if !ok {
+			return fmt.Errorf("unknown digitial interrupt: %s", name)
+		}
+		AddCallback(i, ch)
+	}
+	return nil
+}
+
 // RemoveCallbacks removes the callbacks from the given interrupts.
 func RemoveCallbacks(b Board, interrupts []string, ch chan Tick) error {
 	for _, name := range interrupts {
@@ -115,7 +126,7 @@ func RemoveCallbacks(b Board, interrupts []string, ch chan Tick) error {
 		if !ok {
 			return fmt.Errorf("unknown digitial interrupt: %s", name)
 		}
-		i.RemoveCallback(ch)
+		RemoveCallback(i, ch)
 	}
 	return nil
 }

@@ -579,7 +579,7 @@ func (adxl *adxl345) Close(ctx context.Context) error {
 	defer adxl.mu.Unlock()
 
 	for interrupt, channel := range adxl.interruptChannels {
-		interrupt.RemoveCallback(channel)
+		board.RemoveCallback(interrupt, channel)
 	}
 
 	// Put the chip into standby mode by setting the Power Control register (0x2D) to 0.

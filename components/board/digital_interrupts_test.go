@@ -34,7 +34,7 @@ func TestBasicDigitalInterrupt1(t *testing.T) {
 	test.That(t, intVal, test.ShouldEqual, int64(1))
 
 	c := make(chan Tick)
-	i.AddCallback(c)
+	AddCallback(i, c)
 
 	timeNanoSec := nowNanosecondsTest()
 	go func() { i.Tick(context.Background(), true, timeNanoSec) }()
@@ -49,10 +49,10 @@ func TestBasicDigitalInterrupt1(t *testing.T) {
 	test.That(t, v.High, test.ShouldBeTrue)
 	test.That(t, v.TimestampNanosec, test.ShouldEqual, timeNanoSec)
 
-	i.RemoveCallback(c)
+	RemoveCallback(i, c)
 
 	c = make(chan Tick, 2)
-	i.AddCallback(c)
+	AddCallback(i, c)
 	go func() {
 		i.Tick(context.Background(), true, uint64(1))
 		i.Tick(context.Background(), true, uint64(4))
@@ -80,7 +80,7 @@ func TestRemoveCallbackDigitalInterrupt(t *testing.T) {
 
 	c1 := make(chan Tick)
 	test.That(t, c1, test.ShouldNotBeNil)
-	i.AddCallback(c1)
+	AddCallback(i, c1)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	ret := false
@@ -106,11 +106,11 @@ func TestRemoveCallbackDigitalInterrupt(t *testing.T) {
 	wg.Wait()
 	c2 := make(chan Tick)
 	test.That(t, c2, test.ShouldNotBeNil)
-	i.AddCallback(c2)
+	AddCallback(i, c2)
 	test.That(t, ret, test.ShouldBeTrue)
 
-	i.RemoveCallback(c1)
-	i.RemoveCallback(c1)
+	RemoveCallback(i, c1)
+	RemoveCallback(i, c1)
 
 	ret2 := false
 	result := make(chan bool, 1)
