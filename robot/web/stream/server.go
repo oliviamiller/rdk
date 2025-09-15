@@ -61,6 +61,7 @@ type Server struct {
 	streamConfig gostream.StreamConfig
 	videoSources map[string]gostream.HotSwappableVideoSource
 	audioSources map[string]gostream.HotSwappableAudioSource
+	audioTracks  map[string]webrtc.TrackLocal
 }
 
 // Resolution holds the width and height of a video stream.
@@ -88,6 +89,7 @@ func NewServer(
 		streamConfig:      streamConfig,
 		videoSources:      map[string]gostream.HotSwappableVideoSource{},
 		audioSources:      map[string]gostream.HotSwappableAudioSource{},
+		audioTracks:       map[string]webrtc.TrackLocal{},
 	}
 	server.startMonitorCameraAvailable()
 	return server
@@ -684,19 +686,114 @@ func (server *Server) refreshVideoSources(ctx context.Context) {
 
 // refreshAudioSources checks and initializes every possible audio source that could be viewed from the robot.
 func (server *Server) refreshAudioSources() {
-	for _, name := range audioinput.NamesFromRobot(server.robot) {
-		input, err := audioinput.FromRobot(server.robot, name)
+	server.logger.Info("[AUDIO-DEBUG] Starting refreshAudioSources()")
+
+	// Replace AudioInput discovery with your custom Audio API discovery
+	audioResources := server.robot.ResourceNames()
+	server.logger.Infof("[AUDIO-DEBUG] Found %d total resources on robot", len(audioResources))
+
+	for _, resourceName := range audioResources {
+		server.logger.Infof("[AUDIO-DEBUG] Checking resource: %s (API: %s)", resourceName.ShortName(), resourceName.API.String())
+
+		// Check if this resource is your custom Audio type
+		if resourceName.API.String() != "olivia:component:audio" {
+			server.logger.Debugf("[AUDIO-DEBUG] Skipping resource %s - not olivia:component:audio", resourceName.ShortName())
+			continue
+		}
+
+		server.logger.Infof("[AUDIO-DEBUG] Found olivia Audio resource: %s", resourceName.ShortName())
+
+		// Create WebRTC track for this audio resource
+		trackName := resourceName.SDPTrackName()
+		server.logger.Infof("[AUDIO-DEBUG] Track name will be: %s", trackName)
+
+		if _, exists := server.audioTracks[trackName]; exists {
+			server.logger.Infof("[AUDIO-DEBUG] WebRTC track already exists for %s, skipping", trackName)
+			continue // Track already exists
+		}
+
+		server.logger.Infof("[AUDIO-DEBUG] Creating new WebRTC track for %s", resourceName.ShortName())
+
+		// Create WebRTC track using your audioserver's track creation
+		track, err := server.createAudioWebRTCTrack(resourceName.ShortName())
 		if err != nil {
+			server.logger.Errorf("[AUDIO-DEBUG] Failed to create WebRTC track for %s: %v", resourceName.ShortName(), err)
 			continue
 		}
-		existing, ok := server.audioSources[input.Name().SDPTrackName()]
-		if ok {
-			existing.Swap(input)
-			continue
-		}
-		newSwapper := gostream.NewHotSwappableAudioSource(input)
-		server.audioSources[input.Name().SDPTrackName()] = newSwapper
+
+		server.audioTracks[trackName] = track
+		server.logger.Infof("[AUDIO-DEBUG] Successfully created WebRTC track for audio resource: %s", resourceName.ShortName())
 	}
+
+	server.logger.Infof("[AUDIO-DEBUG] Finished refreshAudioSources(). Total audioTracks: %d", len(server.audioTracks))
+}
+
+// createAudioWebRTCTrack creates a WebRTC track for your custom Audio API
+func (server *Server) createAudioWebRTCTrack(audioResourceName string) (webrtc.TrackLocal, error) {
+	// Import your Audio API package here if needed
+	// audio "github.com/oliviamiller/audioapi-poc"
+
+	// Get your custom Audio resource from the robot
+	audioResource, err := server.robot.ResourceByName(
+		resource.NewName(
+			resource.APINamespace("olivia").WithComponentType("audio"),
+			audioResourceName,
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get audio resource %q: %w", audioResourceName, err)
+	}
+
+	// Cast to your Audio interface
+	audio, ok := audioResource.(interface {
+		Record(ctx context.Context, durationSeconds int) (<-chan interface{}, error) // Replace with your actual AudioChunk type
+	})
+	if !ok {
+		return nil, fmt.Errorf("resource %q does not implement Audio interface", audioResourceName)
+	}
+
+	// Create WebRTC audio track
+	track, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
+		"audio",
+		audioResourceName,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create WebRTC track: %w", err)
+	}
+
+	// Start continuous audio capture and feed to WebRTC track
+	chunkChan, err := audio.Record(context.Background(), 0) // 0 = continuous
+	if err != nil {
+		return nil, fmt.Errorf("failed to start audio recording: %w", err)
+	}
+
+	// Feed audio chunks to WebRTC track in background
+	go func() {
+		for chunk := range chunkChan {
+			// TODO: Convert your AudioChunk to media.Sample format
+			// This depends on your exact AudioChunk structure
+			// For now, assuming chunk has AudioData field:
+
+			/*
+				sample := media.Sample{
+					Data:     chunk.AudioData, // Your PCM data
+					Duration: time.Millisecond * 20, // 20ms frame
+				}
+
+				if err := track.WriteSample(sample); err != nil {
+					server.logger.Errorf("Failed to write sample to WebRTC track %s: %v", audioResourceName, err)
+					return
+				}
+			*/
+
+			// Placeholder - replace with actual conversion logic
+			_ = chunk
+			server.logger.Debugf("Received audio chunk for track %s", audioResourceName)
+		}
+	}()
+
+	return track, nil
 }
 
 func (server *Server) createStream(config gostream.StreamConfig, name string) (gostream.Stream, bool, error) {
