@@ -10,6 +10,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/viamrobotics/webrtc/v3"
+	"github.com/viamrobotics/webrtc/v3/pkg/media"
 	"go.opencensus.io/trace"
 	"go.uber.org/multierr"
 	streampb "go.viam.com/api/stream/v1"
@@ -32,6 +33,13 @@ const (
 	retryDelay            = 50 * time.Millisecond
 	backoffCooldown       = 30 * time.Second
 )
+
+// AudioChunk represents an audio data chunk from your custom audio API
+type AudioChunk struct {
+	Sequence  int64
+	AudioData []byte
+	Err       error
+}
 
 const (
 	optionsCommandResize = iota
@@ -746,7 +754,7 @@ func (server *Server) createAudioWebRTCTrack(audioResourceName string) (webrtc.T
 
 	// Cast to your Audio interface
 	audio, ok := audioResource.(interface {
-		Record(ctx context.Context, durationSeconds int) (<-chan interface{}, error) // Replace with your actual AudioChunk type
+		Record(ctx context.Context, durationSeconds int) (<-chan *AudioChunk, error)
 	})
 	if !ok {
 		return nil, fmt.Errorf("resource %q does not implement Audio interface", audioResourceName)
@@ -771,25 +779,22 @@ func (server *Server) createAudioWebRTCTrack(audioResourceName string) (webrtc.T
 	// Feed audio chunks to WebRTC track in background
 	go func() {
 		for chunk := range chunkChan {
-			// TODO: Convert your AudioChunk to media.Sample format
-			// This depends on your exact AudioChunk structure
-			// For now, assuming chunk has AudioData field:
+			// Handle errors from the audio stream
+			if chunk.Err != nil {
+				server.logger.Errorf("Audio chunk error for %s: %v", audioResourceName, chunk.Err)
+				continue
+			}
 
-			/*
-				sample := media.Sample{
-					Data:     chunk.AudioData, // Your PCM data
-					Duration: time.Millisecond * 20, // 20ms frame
-				}
+			// Convert AudioChunk to media.Sample format
+			sample := media.Sample{
+				Data:     chunk.AudioData,       // Your PCM data
+				Duration: time.Millisecond * 20, // 20ms audio frame
+			}
 
-				if err := track.WriteSample(sample); err != nil {
-					server.logger.Errorf("Failed to write sample to WebRTC track %s: %v", audioResourceName, err)
-					return
-				}
-			*/
-
-			// Placeholder - replace with actual conversion logic
-			_ = chunk
-			server.logger.Debugf("Received audio chunk for track %s", audioResourceName)
+			if err := track.WriteSample(sample); err != nil {
+				server.logger.Errorf("Failed to write sample to WebRTC track %s: %v", audioResourceName, err)
+				return
+			}
 		}
 	}()
 
