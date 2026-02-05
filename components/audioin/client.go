@@ -83,19 +83,17 @@ func (c *client) GetAudio(ctx context.Context, codec string, durationSeconds flo
 		defer close(ch)
 
 		// Send the first response we already received
-		var info *rutils.AudioInfo
-		if resp.Audio.AudioInfo != nil {
-			info = rutils.AudioInfoPBToStruct(resp.Audio.AudioInfo)
+		chunk := AudioChunk{RequestID: resp.RequestId}
+		if resp.Audio != nil {
+			chunk.AudioData = resp.Audio.AudioData
+			chunk.Sequence = resp.Audio.Sequence
+			chunk.StartTimestampNanoseconds = resp.Audio.StartTimestampNanoseconds
+			chunk.EndTimestampNanoseconds = resp.Audio.EndTimestampNanoseconds
+			if resp.Audio.AudioInfo != nil {
+				chunk.AudioInfo = rutils.AudioInfoPBToStruct(resp.Audio.AudioInfo)
+			}
 		}
-
-		ch <- &AudioChunk{
-			AudioData:                 resp.Audio.AudioData,
-			AudioInfo:                 info,
-			Sequence:                  resp.Audio.Sequence,
-			StartTimestampNanoseconds: resp.Audio.StartTimestampNanoseconds,
-			EndTimestampNanoseconds:   resp.Audio.EndTimestampNanoseconds,
-			RequestID:                 resp.RequestId,
-		}
+		ch <- &chunk
 
 		// Continue receiving the rest of the stream
 		for {
@@ -114,19 +112,17 @@ func (c *client) GetAudio(ctx context.Context, codec string, durationSeconds flo
 				return
 			}
 
-			var info *rutils.AudioInfo
-			if resp.Audio.AudioInfo != nil {
-				info = rutils.AudioInfoPBToStruct(resp.Audio.AudioInfo)
+			chunk := AudioChunk{RequestID: resp.RequestId}
+			if resp.Audio != nil {
+				chunk.AudioData = resp.Audio.AudioData
+				chunk.Sequence = resp.Audio.Sequence
+				chunk.StartTimestampNanoseconds = resp.Audio.StartTimestampNanoseconds
+				chunk.EndTimestampNanoseconds = resp.Audio.EndTimestampNanoseconds
+				if resp.Audio.AudioInfo != nil {
+					chunk.AudioInfo = rutils.AudioInfoPBToStruct(resp.Audio.AudioInfo)
+				}
 			}
-
-			ch <- &AudioChunk{
-				AudioData:                 resp.Audio.AudioData,
-				AudioInfo:                 info,
-				Sequence:                  resp.Audio.Sequence,
-				StartTimestampNanoseconds: resp.Audio.StartTimestampNanoseconds,
-				EndTimestampNanoseconds:   resp.Audio.EndTimestampNanoseconds,
-				RequestID:                 resp.RequestId,
-			}
+			ch <- &chunk
 		}
 	}()
 
