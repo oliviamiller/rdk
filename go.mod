@@ -7,6 +7,9 @@ go 1.25.1
 // We fork this bc the stock version of this library is over 20mb.
 replace github.com/hashicorp/go-getter => github.com/viam-labs/go-getter v0.0.0-20251022162721-98d73b852c8a
 
+// PoC: build against local api repo with PlayStream additions.
+replace go.viam.com/api => /Users/oliviamiller/api
+
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/Masterminds/semver/v3 v3.3.1
@@ -112,11 +115,11 @@ require (
 	golang.org/x/text v0.33.0
 	golang.org/x/time v0.10.0
 	golang.org/x/tools v0.40.0
-	gonum.org/v1/gonum v0.16.0
+	gonum.org/v1/gonum v0.17.0
 	gonum.org/v1/plot v0.15.2
 	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409
-	google.golang.org/grpc v1.79.3
+	google.golang.org/grpc v1.80.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
